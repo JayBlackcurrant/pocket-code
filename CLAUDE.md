@@ -11,6 +11,21 @@ Read before big changes:
 - `docs/SPRINT_PLAN.md` (current sprint and task IDs)
 - `docs/ROADMAP.md` (scope boundaries)
 
+## Progress tracking (keep both devices in sync)
+
+Two Claude Code instances work on this repo — one on the always-on Mac (daemon/infra), one on the dev machine (`/app`). Two committed logs keep them in sync:
+
+- `agent_mac.md` — Mac / daemon / infra progress.
+- `app_progress.md` — Flutter app progress.
+
+**Every session, without being asked:**
+
+1. **At the start, read BOTH `agent_mac.md` and `app_progress.md`** before planning — that is how you learn what the other device has done since you last worked.
+2. Work your side: daemon / Mac / infra → log to `agent_mac.md`; `/app` work → log to `app_progress.md`.
+3. **Before you finish, update your side's file**: bump `Last updated`, refresh the `Status snapshot`, and prepend a dated entry to `Log` (what changed, task IDs, what you tested, anything unverified).
+4. Never put secrets in these files (no tokens, pairing codes, API keys, or MagicDNS/tailnet names).
+5. Sync is over git — `git pull` at the start of a session. How progress commits reach the other device follows the Git rules below; these two files are shared state and must land on the branch both devices pull.
+
 ## Repo layout
 
 ```
@@ -47,6 +62,7 @@ Read before big changes:
 3. No secrets, tokens, or real credentials in code, tests, logs, or docs.
 4. If an API, command, or behavior changed, update the relevant doc in `/docs` and this file.
 5. Summarize what changed, what you tested, and anything you did not verify.
+6. Update your side's progress log (`agent_mac.md` or `app_progress.md`): refresh the status snapshot and prepend a dated `Log` entry.
 
 ## Workflow rules
 
