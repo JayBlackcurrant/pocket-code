@@ -1,0 +1,88 @@
+# PocketCode project manifest — hedged-core-app (PILOT, STAGING ONLY)
+#
+# This file lives in the daemon config, OUTSIDE the app repo. The daemon reads it to
+# resolve per-project build/codegen/git/distribution commands. Nothing here targets
+# production: staging flavor, staging Shorebird app_id, staging Firebase project, and
+# the staging keystore only.
+#
+# Values sourced from the repo at:
+#   /Users/jayvishwakarma/Downloads/Projects/hedged/hedged-core-app
+# Replace <...> placeholders once the Mac "agent" user and Firebase staging app exist.
+
+id: hedged
+displayName: Hedged (staging)
+
+# Repo location on the Mac agent user. Must resolve inside RELAYD_ALLOWED_ROOTS.
+# ${AGENT_HOME} is expanded from the environment; until it is set the registry marks
+# this project "unresolved" rather than active.
+path: ${AGENT_HOME}/workspaces/hedged-core-app
+
+# Flutter is run through FVM; the version (3.38.3) is pinned by the repo's .fvmrc.
+flutter: fvm
+
+# ---- Flavor guardrail: pilot is staging-only. Daemon MUST refuse anything else. ----
+flavorDefault: staging
+allowedFlavors:
+  - staging        # production / development are intentionally omitted
+
+# ---- Codegen: run before any build and after editing providers/routes/models. ----
+# dart-api-generator.sh regenerates the local api/ package from the backend OpenAPI
+# spec and REQUIRES the sibling backend checkout to be present next to the app.
+codegen:
+  requiresSibling: ../hedged-core-backend
+  steps:
+    - "fvm flutter pub get"
+    - "./dart-api-generator.sh"
+    - "fvm dart run build_runner build --delete-conflicting-outputs"
+# Never hand-edit generated files; collapse them in diff review.
+generatedGlobs:
+  - "**/*.g.dart"
+  - "**/*.gr.dart"
+  - "**/*.freezed.dart"
+  - "lib/src/gen/**"
+  - "pubspec.lock"
+
+# ---- Build (staging, signed via in-repo staging keystore) ----
+build:
+  apk: "fvm flutter build apk --flavor staging --release"
+  bundle: "fvm flutter build appbundle --flavor staging --release"
+  # Long jobs wrapped in `caffeinate -i` by the daemon; one build at a time.
+
+# ---- Shorebird (staging patch only; NO production release/patch during pilot) ----
+shorebird:
+  patch: "shorebird patch android --flavor staging"
+  appIds:
+    staging: 6903bf09-8fe2-4ca7-a739-57c84740580f
+
+# ---- Signing: keystores stay in-repo (decision). Staging uses: ----
+#   android/app/staging-keystore.jks  (alias: upload)  via android/staging-key.properties
+signing:
+  mode: in-repo
+  flavor: staging
+
+# ---- Git: single GitHub remote; PRs integrate via `stag`, never main/prod. ----
+git:
+  remote: origin                 # github.com/OctanomTech/hedged-core-app.git
+  base: stag                     # confirm before first push
+  branchPrefix: claude/
+  commitStyle: conventional      # type(scope): summary
+  agentMayPush: false            # daemon pushes; agent never runs `git push`
+
+# ---- Distribution: Firebase App Distribution (NEW — provision for staging) ----
+distribution:
+  firebaseAppDistribution:
+    firebaseProject: hedged-core-staging
+    appId: <STAGING_ANDROID_APP_ID>     # create in Firebase console
+    groups:
+      - <INTERNAL_TESTER_GROUP>
+    serviceAccountEnv: GOOGLE_APPLICATION_CREDENTIALS
+    uploadCmd: >-
+      firebase appdistribution:distribute {apk}
+      --app {appId} --groups {groups} --release-notes-file {notesFile}
+
+# ---- Hard guardrail enforced by the daemon for the pilot ----
+guardrails:
+  forbidFlavors: [production, development]
+  forbidBranches: [main]
+  forbidFirebaseProjects: [hedged-core-production]
+  forbidShorebirdRelease: true          # no `shorebird release`, patch only

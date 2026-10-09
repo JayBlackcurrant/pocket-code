@@ -1,0 +1,18 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    use_build_context_synchronously: ignore
+  exclude:
+    - "**/*.gr.dart"
+    - "**/*.g.dart"
+    - "lib/src/gen/**"
+
+linter:
+  rules:
+    # require_trailing_commas is omitted: the Dart 3.10 formatter manages trailing
+    # commas itself, and enabling the lint conflicts with `dart format`.
+    - prefer_single_quotes
+    - prefer_const_constructors
+    - directives_ordering
+    - always_declare_return_types

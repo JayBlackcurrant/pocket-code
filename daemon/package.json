@@ -1,0 +1,40 @@
+{
+  "name": "pocketcode-daemon",
+  "version": "0.0.1",
+  "private": true,
+  "description": "PocketCode daemon (relayd): drives Claude Code, manages git worktrees, builds, and notifications for registered Flutter projects.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "bin": {
+    "relayd": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "pair": "tsx src/cli/pair.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@fastify/websocket": "^11.0.2",
+    "better-sqlite3": "^11.8.1",
+    "fastify": "^5.2.1",
+    "qrcode": "^1.5.4",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.5",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

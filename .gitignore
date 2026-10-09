@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Secrets / local environment — never commit
+**/.env
+**/.env.*
+!**/.env.example
+**/env.sh
+
+# Node (daemon)
+**/node_modules/
+daemon/dist/
+daemon/data/
+*.log
+
+# Dart / Flutter (app)
+app/.dart_tool/
+app/build/
+app/.fvm/
+**/*.iml
+
+# SQLite
+*.sqlite
+*.sqlite-*

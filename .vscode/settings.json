@@ -1,0 +1,12 @@
+{
+  "// dart.flutterSdkPath": "Point the Dart/Flutter extension at the FVM-pinned SDK (3.38.3).",
+  "dart.flutterSdkPath": "app/.fvm/flutter_sdk",
+  "dart.lineLength": 80,
+  "search.exclude": {
+    "**/.dart_tool": true,
+    "**/.fvm/versions": true,
+    "**/build": true,
+    "**/node_modules": true,
+    "**/dist": true
+  }
+}

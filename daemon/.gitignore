@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+
+# Local runtime state and secrets — never commit
+data/
+*.sqlite
+*.sqlite-journal
+.env
+.env.*
+!.env.example

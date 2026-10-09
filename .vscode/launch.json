@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Daemon (relayd)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/daemon",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/daemon/src/index.ts",
+      "envFile": "${workspaceFolder}/daemon/.env",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "App (PocketCode · debug)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/app/lib/main.dart",
+      "cwd": "${workspaceFolder}/app",
+      "flutterMode": "debug"
+    },
+    {
+      "name": "App (PocketCode · release)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/app/lib/main.dart",
+      "cwd": "${workspaceFolder}/app",
+      "flutterMode": "release"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Daemon + App",
+      "configurations": ["Daemon (relayd)", "App (PocketCode · debug)"],
+      "stopAll": true
+    }
+  ]
+}

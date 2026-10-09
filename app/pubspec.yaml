@@ -1,0 +1,49 @@
+name: pocketcode
+description: "PocketCode — remotely control Claude Code on a Mac from your phone."
+publish_to: "none"
+version: 0.0.1+1
+
+environment:
+  sdk: ">=3.6.1 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: 1.0.8
+  # State management (Riverpod 3 + codegen) — mirrors hedged-core-app
+  flutter_riverpod: 3.0.3
+  riverpod_annotation: 3.0.3
+  # Routing (AutoRoute)
+  auto_route: 10.2.3
+  # Networking
+  dio: 5.9.0
+  web_socket_channel: ^3.0.0
+  # Storage — device bearer token in secure storage (CLAUDE.md), prefs for theme
+  flutter_secure_storage: ^10.3.1
+  shared_preferences: 2.5.3
+  # Pairing: scan the QR shown on the Mac
+  mobile_scanner: ^7.1.3
+  # UI / theme
+  google_fonts: 6.3.2
+  flutter_svg: 2.2.3
+  package_info_plus: 9.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+  build_runner: 2.7.1
+  riverpod_generator: 3.0.3
+  auto_route_generator: 10.2.6
+  flutter_gen_runner: 5.12.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/svg/
+    - assets/images/
+
+flutter_gen:
+  output: lib/src/gen/
+  integrations:
+    flutter_svg: true
