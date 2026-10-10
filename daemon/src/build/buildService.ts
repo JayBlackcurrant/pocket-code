@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { ProjectManifest } from '../config/projectManifest.js';
@@ -36,8 +35,11 @@ export interface StepResult {
 /** The single I/O boundary: run one shell step, streaming its output line by line.
  *  Injectable so tests never spawn a real `flutter`. */
 export type RunStep = (args: {
-  /** The full command string from the manifest (e.g. "fvm flutter build apk ..."). */
+  /** The full command string from the manifest (e.g. "fvm flutter build apk ..."), for logging. */
   command: string;
+  /** Pre-tokenized argv. When set it is used verbatim (no whitespace splitting), so an
+   *  argument may contain spaces — used by the upload step for file-path arguments. */
+  argv?: { cmd: string; args: string[] };
   cwd: string;
   signal: AbortSignal;
   onLine: (stream: 'stdout' | 'stderr', line: string) => void;
@@ -75,9 +77,10 @@ export function tokenizeCommand(command: string): { cmd: string; args: string[] 
   return { cmd: parts[0]!, args: parts.slice(1) };
 }
 
-/** Default step runner: spawn without a shell, buffer stdout/stderr into whole lines. */
-const defaultRunStep: RunStep = ({ command, cwd, signal, onLine }) => {
-  const { cmd, args } = tokenizeCommand(command);
+/** Default step runner: spawn without a shell, buffer stdout/stderr into whole lines.
+ *  Shared by the build pipeline (S3-01) and the upload step (S3-02). */
+export const spawnRunStep: RunStep = ({ command, argv, cwd, signal, onLine }) => {
+  const { cmd, args } = argv ?? tokenizeCommand(command);
   return new Promise<StepResult>((resolvePromise, reject) => {
     const child = spawn(cmd, args, { cwd, signal });
     const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
@@ -117,7 +120,6 @@ export class BuildService {
   private readonly runStep: RunStep;
   private log: BuildLogger;
 
-  private readonly emitter = new EventEmitter();
   private readonly queue: string[] = [];
   private readonly settlers = new Map<string, () => void>();
   private readonly settled = new Map<string, Promise<void>>();
@@ -134,7 +136,7 @@ export class BuildService {
     this.builds = deps.builds;
     this.buildLog = deps.buildLog;
     this.tasks = deps.tasks;
-    this.runStep = deps.runStep ?? defaultRunStep;
+    this.runStep = deps.runStep ?? spawnRunStep;
     this.log = deps.logger ?? noopLogger;
   }
 
@@ -143,10 +145,10 @@ export class BuildService {
     this.log = logger;
   }
 
-  /** Subscribe to persisted build events (used by the build WebSocket). */
+  /** Subscribe to persisted build events (used by the build WebSocket). Delegates to the
+   *  shared BuildLog emitter so upload events (S3-02) reach the same stream. */
   onEvent(listener: (e: StoredBuildEvent) => void): () => void {
-    this.emitter.on('event', listener);
-    return () => this.emitter.off('event', listener);
+    return this.buildLog.onEvent(listener);
   }
 
   /** Resolves when the build's run has fully settled (for tests/shutdown). */
@@ -167,8 +169,7 @@ export class BuildService {
   }
 
   private persist(buildId: string, type: string, payload: unknown): void {
-    const stored = this.buildLog.append(buildId, type, payload);
-    this.emitter.emit('event', stored);
+    this.buildLog.append(buildId, type, payload);
   }
 
   /**

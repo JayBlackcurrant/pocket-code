@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — S3-01 build service built on the dev machine (serial build queue + live log stream); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
+**Last updated:** 2026-10-10 — S3-01 build service + S3-02 Firebase upload built on the dev machine (serial build queue + live log stream + distribute step); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
 
 ---
 
@@ -18,7 +18,8 @@
 |------|-------|
 | Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
-| Daemon Sprint 3 (S3-01 build service) | 🟡 **built on dev machine** (typecheck clean, 114 tests) — not yet pulled/run here; no real `flutter build` exercised |
+| Daemon Sprint 3 (S3-01 build + S3-02 upload) | 🟡 **built on dev machine** (typecheck clean, 123 tests) — not yet pulled/run here; no real `flutter build` or Firebase upload exercised |
+| Firebase App Distribution (hedged staging) | ⬜ **not provisioned** — manifest `appId`/`groups` are still `<placeholders>`; upload refuses until a real staging app id + tester group + service-account creds exist |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
@@ -69,6 +70,36 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S3-02 Firebase App Distribution upload — built on the dev machine
+- New `DistributionService` (`src/build/distributionService.ts`): uploads a **succeeded**
+  build's APK to Firebase App Distribution via the Firebase CLI, with tester groups and a
+  **release-notes file** written to a temp path (cleaned up after). Output streams into the
+  **same build log** (`build.upload_started` / `build.upload_log` / `build.upload_completed`
+  / `build.upload_error`), so `/builds/:id/stream` shows build **and** upload together.
+- **Refactor:** the live emitter now lives on `BuildLog` (`append` emits; `onEvent`
+  subscribes), so BuildService and DistributionService share one feed. `index.ts` wires both
+  with the **same `BuildStore` + `BuildLog`** instances (important — don't give them separate
+  BuildLogs or live upload events won't reach the stream).
+- **Guardrails / safety:** refuses a forbidden Firebase project (e.g.
+  `hedged-core-production`) before running; refuses `<placeholder>` appId/groups (app not
+  provisioned yet); **requires** the service-account credential env (`serviceAccountEnv`,
+  default `GOOGLE_APPLICATION_CREDENTIALS`) and **never** falls back to interactive login
+  (CLAUDE.md). Credential value is never logged. Shell-free argv via per-token substitution
+  of the manifest `uploadCmd` (`{apk}`/`{appId}`/`{groups}`/`{notesFile}`), so paths with
+  spaces stay one argument. Best-effort release URL parsed from the CLI output.
+- DB: `builds` gained `upload_status` / `release_url` / `upload_error` (+ idempotent
+  `ADD COLUMN` migration in `openDb` for a DB that predates them). New endpoint
+  `POST /builds/:id/upload` `{releaseNotes?, groups?}` → 202 (409 on guardrail/bad state).
+- **Tested:** typecheck clean, **123/123** (9 new: argv spaced-path substitution, happy-path
+  upload with notes file + release-URL parse, temp-dir cleanup, non-zero → failed, forbidden
+  project refusal, placeholder appId refusal, missing-credential refusal, not-succeeded
+  refusal, missing-artifact refusal). **Not exercised:** a real `firebase appdistribution`
+  upload (needs the provisioned app + creds).
+- **➡️ Action on this Mac (with S3-01):** `git pull` + restart serves the build + upload
+  endpoints. To actually ship: provision the hedged **staging** Firebase app, fill the
+  manifest `appId` + tester `groups`, and set `GOOGLE_APPLICATION_CREDENTIALS` to the service
+  account JSON (in `env.sh`). Until then upload returns a clear 409 explaining what's missing.
 
 ### 2026-10-10 — S3-01 build service — built on the dev machine
 - New `BuildService` (`src/build/buildService.ts`): a **serial queue** (one build at a

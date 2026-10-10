@@ -27,6 +27,7 @@ import type { EventLog, StoredEvent } from './db/eventLog.js';
 import { GitError, type GitService } from './git/gitService.js';
 import { branchBlockedReason, GuardrailError } from './guardrails.js';
 import { BuildService, BuildError } from './build/buildService.js';
+import { DistributionService, DistributionError } from './build/distributionService.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
 
 export interface ServerDeps {
@@ -38,6 +39,7 @@ export interface ServerDeps {
   events: EventLog;
   git: GitService;
   builds: BuildService;
+  distribution: DistributionService;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */
@@ -89,6 +91,11 @@ const CreateBuildBody = z.object({
   flavor: z.string().min(1).max(100).optional(),
   taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(),
   runCodegen: z.boolean().optional(),
+});
+
+const UploadBuildBody = z.object({
+  releaseNotes: z.string().max(20_000).optional(),
+  groups: z.array(z.string().min(1).max(200)).max(50).optional(),
 });
 
 /** Base ref to diff a task against: its project's manifest git.base. */
@@ -508,6 +515,26 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const cancelling = deps.builds.cancel(req.params.id);
     if (!cancelling) return reply.code(409).send({ error: `build already ${build.status}` });
     return reply.code(202).send({ status: 'cancelling' });
+  });
+
+  // Upload a succeeded build to Firebase App Distribution (S3-02). Guardrail-checked; the
+  // upload streams into the same build log, so watch /builds/:id/stream for progress.
+  app.post<{ Params: { id: string } }>('/builds/:id/upload', auth, async (req, reply) => {
+    const parsed = UploadBuildBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+    }
+    if (!deps.builds.get(req.params.id)) return reply.code(404).send({ error: 'unknown build' });
+    try {
+      deps.distribution.upload(req.params.id, {
+        ...(parsed.data.releaseNotes !== undefined ? { releaseNotes: parsed.data.releaseNotes } : {}),
+        ...(parsed.data.groups !== undefined ? { groups: parsed.data.groups } : {}),
+      });
+      return reply.code(202).send({ status: 'uploading' });
+    } catch (err) {
+      if (err instanceof DistributionError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
   });
 
   // Live build log with replay (same shape as the task stream): replay everything after

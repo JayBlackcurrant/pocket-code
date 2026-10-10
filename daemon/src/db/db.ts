@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS builds (
   status      TEXT NOT NULL,              -- queued | running | succeeded | failed | cancelled
   exit_code   INTEGER,                    -- failing step's exit code
   error       TEXT,                       -- short failure reason
+  upload_status TEXT,                     -- NULL | uploading | uploaded | failed (S3-02)
+  release_url   TEXT,                     -- Firebase console link, if parsed from output
+  upload_error  TEXT,                     -- upload failure reason
   created_at  INTEGER NOT NULL,
   started_at  INTEGER,
   finished_at INTEGER,
@@ -107,11 +110,24 @@ CREATE TABLE IF NOT EXISTS build_events (
 CREATE INDEX IF NOT EXISTS idx_build_events_build_seq ON build_events(build_id, seq);
 `;
 
+/** Add a column if it is not already present. Lets a DB created by an earlier task pick up
+ *  columns added by a later one without a destructive migration. */
+function addColumnIfMissing(db: Db, table: string, column: string, decl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  }
+}
+
 export function openDb(dbPath: string): Db {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // Migrations for DBs created before a column existed (S3-02 upload fields).
+  addColumnIfMissing(db, 'builds', 'upload_status', 'TEXT');
+  addColumnIfMissing(db, 'builds', 'release_url', 'TEXT');
+  addColumnIfMissing(db, 'builds', 'upload_error', 'TEXT');
   return db;
 }

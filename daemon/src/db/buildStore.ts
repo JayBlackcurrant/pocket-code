@@ -1,6 +1,7 @@
 import type { Db } from './db.js';
 
 export type BuildStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type UploadStatus = 'uploading' | 'uploaded' | 'failed';
 
 export interface BuildRow {
   id: string;
@@ -12,6 +13,9 @@ export interface BuildRow {
   status: BuildStatus;
   exitCode: number | null;
   error: string | null;
+  uploadStatus: UploadStatus | null;
+  releaseUrl: string | null;
+  uploadError: string | null;
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -28,6 +32,9 @@ interface RawBuildRow {
   status: BuildStatus;
   exit_code: number | null;
   error: string | null;
+  upload_status: UploadStatus | null;
+  release_url: string | null;
+  upload_error: string | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
@@ -45,6 +52,9 @@ function toBuild(r: RawBuildRow): BuildRow {
     status: r.status,
     exitCode: r.exit_code,
     error: r.error,
+    uploadStatus: r.upload_status,
+    releaseUrl: r.release_url,
+    uploadError: r.upload_error,
     createdAt: r.created_at,
     startedAt: r.started_at,
     finishedAt: r.finished_at,
@@ -108,6 +118,26 @@ export class BuildStore {
     this.db
       .prepare("UPDATE builds SET status = 'cancelled', finished_at = ?, updated_at = ? WHERE id = ?")
       .run(now, now, id);
+  }
+
+  // --- Distribution (S3-02) -------------------------------------------------
+
+  markUploading(id: string): void {
+    this.db
+      .prepare("UPDATE builds SET upload_status = 'uploading', upload_error = NULL, updated_at = ? WHERE id = ?")
+      .run(Date.now(), id);
+  }
+
+  markUploaded(id: string, releaseUrl: string | null): void {
+    this.db
+      .prepare("UPDATE builds SET upload_status = 'uploaded', release_url = ?, updated_at = ? WHERE id = ?")
+      .run(releaseUrl, Date.now(), id);
+  }
+
+  markUploadFailed(id: string, reason: string): void {
+    this.db
+      .prepare("UPDATE builds SET upload_status = 'failed', upload_error = ?, updated_at = ? WHERE id = ?")
+      .run(reason, Date.now(), id);
   }
 
   get(id: string): BuildRow | undefined {

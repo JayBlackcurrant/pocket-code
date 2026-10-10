@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import type { Db } from './db.js';
 
 export interface StoredBuildEvent {
@@ -12,10 +13,15 @@ export interface StoredBuildEvent {
  * Append-only build log (S3-01), the build-side twin of EventLog. Each line/lifecycle
  * event is written to SQLite with a monotonically increasing `seq` BEFORE it is streamed,
  * so a phone that disconnects mid-build can replay with `since=<seq>`.
+ *
+ * It also owns the live emitter, so every writer (BuildService for build steps,
+ * DistributionService for the upload step, S3-02) streams through one feed and a single
+ * `/builds/:id/stream` shows build and upload progress together.
  */
 export class BuildLog {
   private readonly insertStmt;
   private readonly sinceStmt;
+  private readonly emitter = new EventEmitter();
 
   constructor(private readonly db: Db) {
     this.insertStmt = db.prepare(
@@ -24,13 +30,23 @@ export class BuildLog {
     this.sinceStmt = db.prepare(
       'SELECT seq, build_id, type, payload, created_at FROM build_events WHERE build_id = ? AND seq > ? ORDER BY seq ASC',
     );
+    // Many WS clients may subscribe to busy builds; lift the default 10-listener cap.
+    this.emitter.setMaxListeners(0);
   }
 
-  /** Persist an event and return it with its assigned seq. */
+  /** Subscribe to persisted events as they are appended (used by the build WebSocket). */
+  onEvent(listener: (e: StoredBuildEvent) => void): () => void {
+    this.emitter.on('event', listener);
+    return () => this.emitter.off('event', listener);
+  }
+
+  /** Persist an event, emit it live, and return it with its assigned seq. */
   append(buildId: string, type: string, payload: unknown): StoredBuildEvent {
     const createdAt = Date.now();
     const info = this.insertStmt.run(buildId, type, JSON.stringify(payload ?? null), createdAt);
-    return { seq: Number(info.lastInsertRowid), buildId, type, payload, createdAt };
+    const stored = { seq: Number(info.lastInsertRowid), buildId, type, payload, createdAt };
+    this.emitter.emit('event', stored);
+    return stored;
   }
 
   /** All events for a build after `sinceSeq` (0 = from the start), in order. */
