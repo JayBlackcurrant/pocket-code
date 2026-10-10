@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
 import '../../routes/app_router.dart';
+import '../../security/biometric_gate.dart';
 import '../models/diff_file.dart';
 import '../providers/diff_providers.dart';
 import '../providers/git_actions.dart';
@@ -55,6 +56,12 @@ class ReviewPage extends ConsumerWidget {
         'Push this task\'s claude/* branch to the remote.')) {
       return;
     }
+    if (!context.mounted) return;
+    // Sensitive action — gate behind biometric (S3-07).
+    if (!await ensureBiometric(ref, context, 'Confirm to push the branch')) {
+      return;
+    }
+    if (!context.mounted) return;
     await _run(context, ref, () async {
       final branch = await ref.read(gitActionsProvider(taskId).notifier).push();
       return 'Pushed $branch';

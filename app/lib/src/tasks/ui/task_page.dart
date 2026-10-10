@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
 import '../../routes/app_router.dart';
+import '../../security/biometric_gate.dart';
 import '../models/pending_approval.dart';
 import '../models/task_stream_state.dart';
 import '../providers/task_stream.dart';
@@ -28,6 +29,15 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  // "Always allow" is a sensitive action — gate behind biometric (S3-07).
+  Future<void> _alwaysAllow(String toolName) async {
+    if (!await ensureBiometric(
+        ref, context, 'Confirm to always allow $toolName')) {
+      return;
+    }
+    ref.read(taskStreamProvider(widget.taskId).notifier).alwaysAllow(toolName);
   }
 
   void _scrollToEnd() {
@@ -79,8 +89,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
               onDecide: (allow, reason) => ref
                   .read(provider.notifier)
                   .decide(p.toolUseId, allow: allow, reason: reason),
-              onAlwaysAllow: () =>
-                  ref.read(provider.notifier).alwaysAllow(p.toolName),
+              onAlwaysAllow: () => _alwaysAllow(p.toolName),
             ),
           Expanded(
             child: state.items.isEmpty

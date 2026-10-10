@@ -25,7 +25,7 @@
 | Code viewer (S2-08) | ✅ done — full-file viewer, Dart/YAML syntax highlighting, line numbers |
 | Git actions (S2-09 app) | ✅ done — commit/push/discard menu + long-press revert on review screen |
 | Builds screen (S3-06) | ✅ done — Build & ship screen: start build, live log (WS), editable AI release notes, group field, upload, Firebase link, retry |
-| Biometric gate (S3-07) | ⬜ not started (upload/retry not yet gated) |
+| Biometric gate (S3-07) | ✅ done — `local_auth` gate on push, build/retry, upload (distribute), and "always allow"; fails closed |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
 > instruction; `CLAUDE.md` repo-layout line updated accordingly). S1-09 and S1-10 are **built
@@ -43,7 +43,7 @@
 - [x] **S2-07** Review screen (file list, +/- counts, unified diff; smooth on large diffs)
 - [x] **S2-08** Code viewer with syntax highlighting (chunked for large files)
 - [x] **S3-06** Builds screen (group field, notes editor, live progress, Firebase link, retry)
-- [ ] **S3-07** Biometric gate (`local_auth`) for push / build / "always allow"
+- [x] **S3-07** Biometric gate (`local_auth`) for push / build / "always allow"
 
 ---
 
@@ -78,6 +78,27 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S3-07 biometric gate for sensitive actions
+- New `src/security/`: `BiometricGate` wraps a `LocalAuthenticator` seam (default
+  `PlatformAuthenticator` over **`local_auth`**; `biometricOnly:false` so device PIN/pattern
+  is an accepted fallback). **Fails closed** — if the device can't authenticate, or the
+  prompt is declined/throws, the action is blocked. `ensureBiometric(ref, context, reason)`
+  helper gates a call and snackbars on failure. Gate exposed as `biometricGateProvider`
+  (overridable in tests).
+- **Gated (CLAUDE.md "push, build and distribute, always allow"):** push (review page),
+  **start build** + **retry** + **upload/distribute** (builds page), and **"Always allow"**
+  on an approval card (task page). Each aborts if the gate isn't passed.
+- **New dependency `local_auth: 2.3.0`** — sanctioned by S3-07, which names it. Alternative
+  considered: hand-rolled platform channels to BiometricPrompt/LAContext — strictly more
+  native code to maintain for the same result. Native prerequisites done: `MainActivity` now
+  extends **`FlutterFragmentActivity`** (required by local_auth) and `AndroidManifest` adds
+  `USE_BIOMETRIC`. (iOS would need `NSFaceIDUsageDescription` when an iOS build is added.)
+- **Tested:** `analyze` clean, `flutter test` **38/38** (5 new gate cases: success, declined,
+  unavailable→blocked, isSupported-throws→blocked, prompt-throws→blocked),
+  `flutter build bundle` compiles. **Not verified:** the real biometric prompt on device
+  (needs an APK build on a phone with a lock set) and the native `FlutterFragmentActivity`
+  change (not exercised by `build bundle`) — confirm on the first real device build.
 
 ### 2026-10-10 — S3-06 builds screen (Build & ship)
 - New `src/builds/` feature driving the daemon's S3-01…04 pipeline from the phone. Entry: a

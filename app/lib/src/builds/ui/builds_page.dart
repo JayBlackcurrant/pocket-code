@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../../security/biometric_gate.dart';
 import '../../tasks/models/task_detail.dart';
 import '../../tasks/providers/task_provider.dart';
 import '../build_feed.dart';
@@ -75,6 +76,10 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
   }
 
   Future<void> _start(TaskDetail task) async {
+    // Building is a sensitive action (CLAUDE.md) — gate behind biometric (S3-07).
+    if (!await ensureBiometric(ref, context, 'Confirm to start a build')) {
+      return;
+    }
     setState(() => _busy = true);
     try {
       final b = await ref.read(buildActionsProvider.notifier).start(
@@ -109,6 +114,9 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
   Future<void> _retry() async {
     final id = _buildId;
     if (id == null) return;
+    if (!await ensureBiometric(ref, context, 'Confirm to retry the build')) {
+      return;
+    }
     setState(() => _busy = true);
     try {
       final b = await ref.read(buildActionsProvider.notifier).retry(id);
@@ -145,7 +153,10 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
   Future<void> _upload() async {
     final id = _buildId;
     if (id == null) return;
-    // NOTE: distribute is a sensitive action — a biometric gate is added in S3-07.
+    // Distribute is a sensitive action — gate behind biometric (S3-07).
+    if (!await ensureBiometric(ref, context, 'Confirm to upload to testers')) {
+      return;
+    }
     final groups = _groups.text
         .split(',')
         .map((g) => g.trim())

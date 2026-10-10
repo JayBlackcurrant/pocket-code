@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- local_auth: biometric / device-credential prompt for sensitive actions (S3-07). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
         android:label="pocketcode"
         android:name="${applicationName}"
