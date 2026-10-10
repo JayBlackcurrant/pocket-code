@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — Firebase App Distribution replaced with a keyless **Tailscale-served APK link** (branch `claude/tailscale-distribution`, 161 tests); earlier: Sprint 3 daemon complete; Sprint 2 reviewed; agent SDK 0.1.77→0.3.296 (zod 3→4)
+**Last updated:** 2026-10-10 — codegen steps can now run in a subdirectory (`dir:`) so hedged's `api/` build_runner runs before the app root; Firebase App Distribution replaced with a keyless **Tailscale-served APK link** (branch `claude/tailscale-distribution`, 163 tests); earlier: Sprint 3 daemon complete; SDK 0.1.77→0.3.296 (zod 3→4)
 
 ---
 
@@ -75,6 +75,22 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — codegen steps support a per-step working directory (`dir:`) — this Mac
+On branch `claude/tailscale-distribution` (`18d1075`). A codegen step can now be `{ run, dir }`,
+not just a bare string, so it runs in a worktree subdirectory. Needed because the first real build
+only ran `build_runner` at the app root, not in the `api/` path-dependency package.
+- The daemon runner is still **shell-free** (no `cd`/`&&`); the step just gets a different cwd,
+  resolved with `safeResolveWithin` so a `../`/symlink escape fails the build cleanly.
+- `projectManifest.ts`: `CodegenStepSchema = string | { run, dir? }` (backward compatible).
+  `buildService.ts`: normalize each step, compute the step cwd, record `dir` on the `build.step` event.
+  `hedged.yaml`: `fvm flutter pub get` → `build_runner` in `dir: api` → `build_runner` at root.
+- **Tested:** typecheck clean, **163 tests** (2 new: runs-in-subdir asserts the api step's cwd;
+  dir-escape fails the build). **Not verified on a real build yet** — `api/` may also need its own
+  `fvm dart pub get` before `build_runner`; if the api step fails on unresolved packages, add a
+  `{ run: "fvm flutter pub get", dir: api }` step (one line now that `dir:` exists).
+- Requires a daemon **restart** to load the new manifest (config loads at startup; tsx watch only
+  watches `src/`).
 
 ### 2026-10-10 — hedged codegen: skip dart-api-generator (backend not on this Mac) — dev side
 First real build on the always-on Mac failed with the intended clear error: *"codegen requires
