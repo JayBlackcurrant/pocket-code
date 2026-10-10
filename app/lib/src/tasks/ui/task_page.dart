@@ -60,6 +60,12 @@ class _TaskPageState extends ConsumerState<TaskPage> {
             onPressed: () =>
                 context.router.push(ReviewRoute(taskId: widget.taskId)),
           ),
+          IconButton(
+            tooltip: 'Build & ship',
+            icon: const Icon(Icons.rocket_launch_outlined),
+            onPressed: () =>
+                context.router.push(BuildsRoute(taskId: widget.taskId)),
+          ),
           _StatusChip(status: state.status),
         ],
       ),

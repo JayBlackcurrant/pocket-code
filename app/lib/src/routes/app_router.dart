@@ -2,6 +2,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../builds/ui/builds_page.dart';
 import '../home/ui/home_page.dart';
 import '../pairing/ui/pairing_page.dart';
 import '../project/ui/project_file_page.dart';
@@ -65,6 +66,11 @@ class AppRouter extends RootStackRouter {
         AutoRoute(
           page: CodeViewerRoute.page,
           path: '/tasks/:taskId/file',
+          guards: [PairingGuard(_ref)],
+        ),
+        AutoRoute(
+          page: BuildsRoute.page,
+          path: '/tasks/:taskId/build',
           guards: [PairingGuard(_ref)],
         ),
         AutoRoute(page: PairingRoute.page, path: '/pair'),

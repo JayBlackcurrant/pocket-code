@@ -24,7 +24,8 @@
 | Diff review (S2-07) | ✅ done — file list (+/- counts, generated collapsed) → per-file unified diff |
 | Code viewer (S2-08) | ✅ done — full-file viewer, Dart/YAML syntax highlighting, line numbers |
 | Git actions (S2-09 app) | ✅ done — commit/push/discard menu + long-press revert on review screen |
-| Builds screen + biometric gate (S3-06, S3-07) | ⬜ not started |
+| Builds screen (S3-06) | ✅ done — Build & ship screen: start build, live log (WS), editable AI release notes, group field, upload, Firebase link, retry |
+| Biometric gate (S3-07) | ⬜ not started (upload/retry not yet gated) |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
 > instruction; `CLAUDE.md` repo-layout line updated accordingly). S1-09 and S1-10 are **built
@@ -41,7 +42,7 @@
 - [x] **S2-04** Approval cards (Allow once / Always / Deny with reason)
 - [x] **S2-07** Review screen (file list, +/- counts, unified diff; smooth on large diffs)
 - [x] **S2-08** Code viewer with syntax highlighting (chunked for large files)
-- [ ] **S3-06** Builds screen (group picker, notes editor, progress, Firebase link)
+- [x] **S3-06** Builds screen (group field, notes editor, live progress, Firebase link, retry)
 - [ ] **S3-07** Biometric gate (`local_auth`) for push / build / "always allow"
 
 ---
@@ -77,6 +78,32 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S3-06 builds screen (Build & ship)
+- New `src/builds/` feature driving the daemon's S3-01…04 pipeline from the phone. Entry: a
+  **rocket** action on the task page → `BuildsRoute` (`/tasks/:taskId/build`). The screen
+  derives the project from `taskDetail`, then:
+  - **Start build** (codegen toggle) → `POST /projects/:id/builds {taskId, runCodegen}`.
+  - **Live log** over `WS /builds/:id/stream?since=` (`BuildStream`, replay + reconnect, same
+    contract as the task stream), rendered as monospace lines with **step markers** and
+    colored lifecycle/success/error lines. Status chip (queued/running/succeeded/failed/
+    uploading/uploaded). Auto-scrolls.
+  - On success: **editable release notes** prefilled from `GET /tasks/:id/release-notes`
+    (shows "from Claude" vs "from diff"), a **Regenerate** button, a **tester-groups** field
+    (comma-separated; empty = project default), and **Upload to testers** →
+    `POST /builds/:id/upload`. Upload progress streams into the same log.
+  - On upload done: the **Firebase release link** with a Copy button.
+  - On failure/cancel: **Retry** → `POST /builds/:id/retry` (new build id).
+  - On open, resumes the latest build for the task if one exists.
+- New files: `builds/models/build_row.dart`, `builds/build_feed.dart` (pure event→line +
+  status reducers), `builds/models/build_stream_state.dart`, `builds/providers/build_stream.dart`,
+  `builds/providers/build_actions.dart`, `builds/ui/builds_page.dart`; route + task-page entry.
+- **Deferred to S3-07:** upload/retry are **not biometric-gated** yet (CLAUDE.md wants a
+  biometric check on build & distribute). Marked with a NOTE in `_upload`. Group *picker* is a
+  text field for now (daemon doesn't expose configured groups); fine until Firebase is set up.
+- **Tested:** `analyze` clean, `flutter test` **33/33** (13 new build_feed cases),
+  `flutter build bundle` compiles. The live build/upload flow isn't widget-tested; verify on
+  device once the agent Mac serves S3-01…04 (and Firebase staging is provisioned for upload).
 
 ### 2026-10-10 — @path autocomplete in the prompt box
 - Typing `@` in the project composer shows a live file-suggestion panel (just above the input)

@@ -11,6 +11,50 @@
 part of 'app_router.dart';
 
 /// generated route for
+/// [BuildsPage]
+class BuildsRoute extends PageRouteInfo<BuildsRouteArgs> {
+  BuildsRoute({required String taskId, Key? key, List<PageRouteInfo>? children})
+      : super(
+          BuildsRoute.name,
+          args: BuildsRouteArgs(taskId: taskId, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'BuildsRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<BuildsRouteArgs>();
+      return BuildsPage(taskId: args.taskId, key: args.key);
+    },
+  );
+}
+
+class BuildsRouteArgs {
+  const BuildsRouteArgs({required this.taskId, this.key});
+
+  final String taskId;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'BuildsRouteArgs{taskId: $taskId, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! BuildsRouteArgs) return false;
+    return taskId == other.taskId && key == other.key;
+  }
+
+  @override
+  int get hashCode => taskId.hashCode ^ key.hashCode;
+}
+
+/// generated route for
 /// [CodeViewerPage]
 class CodeViewerRoute extends PageRouteInfo<CodeViewerRouteArgs> {
   CodeViewerRoute({
