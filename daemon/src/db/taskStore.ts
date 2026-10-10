@@ -1,6 +1,13 @@
 import type { Db } from './db.js';
 
-export type TaskStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'cancelled';
+export type TaskStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+  | 'discarded';
 
 export interface TaskRow {
   id: string;

@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -150,5 +158,59 @@ describe('GitService diff (S2-05)', () => {
 
   it('rejects a path outside the worktree', async () => {
     await expect(svc.diffFile(drepo, 'stag', '../outside.txt')).rejects.toBeTruthy();
+  });
+});
+
+describe('GitService git actions (S2-09)', () => {
+  let repo2: string;
+  let bare: string;
+
+  beforeAll(async () => {
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'pc-gitact-')));
+    repo2 = join(base, 'repo');
+    bare = join(base, 'remote.git');
+    await runGit(base, ['init', '--bare', 'remote.git']);
+    mkdirSync(repo2, { recursive: true });
+    await runGit(repo2, ['init', '-b', 'stag']);
+    writeFileSync(join(repo2, 'README.md'), 'line1\nline2\n');
+    await runGit(repo2, ['add', '.']);
+    await commit(repo2, 'base');
+    await runGit(repo2, ['remote', 'add', 'origin', bare]);
+  });
+
+  afterAll(() => rmSync(join(repo2, '..'), { recursive: true, force: true }));
+
+  it('commits all changes, then reports nothing to commit', async () => {
+    writeFileSync(join(repo2, 'new.txt'), 'hi\n');
+    const res = await svc.commitAll(repo2, 'feat: add new');
+    expect(res.sha).toMatch(/^[0-9a-f]{7,}/);
+    await expect(svc.commitAll(repo2, 'again')).rejects.toThrow(/nothing to commit/);
+  });
+
+  it('reverts a tracked file to HEAD', async () => {
+    writeFileSync(join(repo2, 'README.md'), 'line1\nTAMPERED\nline2\n');
+    await svc.revertFile(repo2, 'README.md');
+    expect(readFileSync(join(repo2, 'README.md'), 'utf8')).toBe('line1\nline2\n');
+  });
+
+  it('reverts (deletes) an untracked file', async () => {
+    writeFileSync(join(repo2, 'scratch.txt'), 'temp\n');
+    await svc.revertFile(repo2, 'scratch.txt');
+    expect(existsSync(join(repo2, 'scratch.txt'))).toBe(false);
+  });
+
+  it('pushes a claude/* branch to the remote', async () => {
+    await runGit(repo2, ['checkout', '-b', 'claude/push-test']);
+    writeFileSync(join(repo2, 'p.txt'), 'x\n');
+    await svc.commitAll(repo2, 'feat: push test');
+    await svc.pushBranch(repo2, 'origin', 'claude/push-test');
+    // The branch is now visible in the (bare) remote.
+    await expect(
+      runGit(bare, ['show-ref', '--verify', 'refs/heads/claude/push-test']),
+    ).resolves.toContain('claude/push-test');
+  });
+
+  it('refuses to push a non-claude branch (main protected)', async () => {
+    await expect(svc.pushBranch(repo2, 'origin', 'main')).rejects.toThrow(/non-claude/);
   });
 });

@@ -23,6 +23,7 @@
 | Approvals UI (S2-04) | ✅ done — approval cards (Allow once / Always / Deny+reason) in the task stream |
 | Diff review (S2-07) | ✅ done — file list (+/- counts, generated collapsed) → per-file unified diff |
 | Code viewer (S2-08) | ✅ done — full-file viewer, Dart/YAML syntax highlighting, line numbers |
+| Git actions (S2-09 app) | ✅ done — commit/push/discard menu + long-press revert on review screen |
 | Builds screen + biometric gate (S3-06, S3-07) | ⬜ not started |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
@@ -76,6 +77,16 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S2-09 git actions (app)
+- Review screen app-bar menu: **Commit…** (dialog prefilled with the daemon's suggested
+  message, editable), **Push branch** (confirm → `POST /push`), **Discard task** (confirm →
+  `POST /discard` → back to Home). **Long-press a file → Revert** (confirm → `POST /revert`).
+  New provider `git_actions.dart` (suggestMessage/commit/revert/push/discard).
+- Push/discard are confirm-gated for now; **biometric gate is S3-07** (CLAUDE.md requires it
+  for push). Decisions hit the daemon's S2-09 endpoints; only `claude/*` is pushable.
+- **Tested:** `analyze` clean, `flutter test` 20/20 (UI handlers not unit-tested; daemon git
+  actions covered 97/97 on the daemon side).
 
 ### 2026-10-10 — S2-08 code viewer
 - `CodeViewerPage` (route `/tasks/:taskId/file`) reads full file content via S2-06

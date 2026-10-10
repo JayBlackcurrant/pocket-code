@@ -18,6 +18,7 @@ import type { AgentRunner } from './agent/agentRunner.js';
 import type { TaskStore } from './db/taskStore.js';
 import type { EventLog, StoredEvent } from './db/eventLog.js';
 import { GitError, type GitService } from './git/gitService.js';
+import { branchBlockedReason } from './guardrails.js';
 
 export interface ServerDeps {
   env: DaemonEnv;
@@ -71,6 +72,8 @@ const DecisionBody = z.object({
 });
 
 const DiffQuery = z.object({ path: z.string().min(1) });
+const CommitBody = z.object({ message: z.string().min(1).max(2000).optional() });
+const RevertBody = z.object({ path: z.string().min(1) });
 
 /** Base ref to diff a task against: its project's manifest git.base. */
 function taskBaseRef(deps: ServerDeps, projectId: string): string | undefined {
@@ -272,6 +275,91 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       return { decided: parsed.data.decision };
     },
   );
+
+  // --- Git actions (S2-09) ---------------------------------------------------
+
+  // Suggested commit message (editable in the app).
+  app.get<{ Params: { id: string } }>('/tasks/:id/commit-message', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+    const base = taskBaseRef(deps, task.projectId);
+    if (!base) return reply.code(409).send({ error: 'unknown project base' });
+    return { message: await deps.git.suggestCommitMessage(task.worktree, base) };
+  });
+
+  // Commit all changes with a (Claude/user) message.
+  app.post<{ Params: { id: string } }>('/tasks/:id/commit', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+    const base = taskBaseRef(deps, task.projectId);
+    if (!base) return reply.code(409).send({ error: 'unknown project base' });
+    const parsed = CommitBody.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid body' });
+    const message = parsed.data.message ?? (await deps.git.suggestCommitMessage(task.worktree, base));
+    try {
+      return await deps.git.commitAll(task.worktree, message);
+    } catch (err) {
+      if (err instanceof GitError && err.message === 'nothing to commit') {
+        return reply.code(409).send({ error: 'nothing to commit' });
+      }
+      if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // Revert one file's changes.
+  app.post<{ Params: { id: string } }>('/tasks/:id/revert', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+    const parsed = RevertBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'path is required' });
+    try {
+      await deps.git.revertFile(task.worktree, parsed.data.path);
+      return { reverted: parsed.data.path };
+    } catch (err) {
+      if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
+      if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // Push the task's claude/* branch to its remote (never main; the daemon pushes).
+  app.post<{ Params: { id: string } }>('/tasks/:id/push', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    if (!task.worktree || !task.branch) return reply.code(409).send({ error: 'task has no branch yet' });
+    const project = deps.registry.get(task.projectId);
+    if (!project) return reply.code(409).send({ error: 'unknown project' });
+    const blocked = branchBlockedReason(project.manifest, task.branch);
+    if (blocked) return reply.code(409).send({ error: blocked });
+    try {
+      await deps.git.pushBranch(task.worktree, project.manifest.git.remote, task.branch);
+      return { pushed: true, branch: task.branch, remote: project.manifest.git.remote };
+    } catch (err) {
+      if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // Discard a task: cancel if running, remove the worktree + branch, mark discarded.
+  app.post<{ Params: { id: string } }>('/tasks/:id/discard', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    const project = deps.registry.getActive(task.projectId);
+    if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+    await deps.runner.cancel(task.id);
+    try {
+      await deps.git.removeWorktree(project.resolvedPath, task.id);
+    } catch (err) {
+      if (!(err instanceof GitError)) throw err;
+      // Worktree may already be gone; discard is best-effort.
+    }
+    deps.tasks.setStatus(task.id, 'discarded');
+    return { discarded: task.id };
+  });
 
   // Cancel a running task (S1-07). The runner interrupts the agent (SDK interrupt(),
   // falling back to aborting the process), which unwinds the run loop and emits

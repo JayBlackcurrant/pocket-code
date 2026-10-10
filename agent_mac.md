@@ -21,7 +21,8 @@
 | Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
 | Approval timeout (S2-03) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
 | Diff endpoints (S2-05) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| File reader (S2-06) | ✅ code done (dev machine) — **needs `git pull` + restart here** (92/92 tests) |
+| File reader (S2-06) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
+| Git actions (S2-09 daemon) | ✅ code done (dev machine) — **needs `git pull` + restart here** (97/97 tests) |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
@@ -66,6 +67,21 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S2-09 git actions (daemon) — built on the dev machine
+- `GitService`: `commitAll` (stage+commit, "nothing to commit" via `status --porcelain`),
+  `revertFile` (restore tracked / delete untracked, path-safe), `pushBranch` (**refuses any
+  non-`claude/*` branch**), `suggestCommitMessage`. Endpoints: `GET /tasks/:id/commit-message`,
+  `POST /tasks/:id/commit` `{message?}`, `POST /tasks/:id/revert` `{path}`,
+  `POST /tasks/:id/push`, `POST /tasks/:id/discard` (cancel → remove worktree+branch → status
+  `discarded`). Push is guarded by `branchBlockedReason` (manifest forbids `main`).
+- **The daemon is the only pusher** (CLAUDE.md); the agent never pushes. Commits use a
+  `PocketCode <agent@pocketcode.local>` identity for now (make configurable later if you want
+  your own authorship on `claude/*`).
+- **Tested:** 97/97 (commit + nothing-to-commit, revert tracked/untracked, **push a claude/\*
+  branch to a bare remote**, refuse pushing `main`).
+- **➡️ Action on this Mac:** `git pull` + restart. First real **push** needs the GitHub remote
+  reachable + auth as the `agent` user (SSH key or gh token) — verify before trying from the phone.
 
 ### 2026-10-10 — S2-06 file reader — built on the dev machine
 - `readFileSafe` (`src/fs/fileReader.ts`): read-only file read inside a task worktree, through

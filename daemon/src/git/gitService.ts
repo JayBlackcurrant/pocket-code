@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { safeResolveWithin } from '../fs/pathSafety.js';
@@ -318,6 +318,54 @@ export class GitService {
       truncated = true;
     }
     return { path: rel, binary: false, truncated, patch: out };
+  }
+
+  /** Suggest a commit message from the changed-files summary (editable in the app). */
+  async suggestCommitMessage(repoPath: string, baseRef: string): Promise<string> {
+    const files = await this.diffSummary(repoPath, baseRef);
+    if (files.length === 0) return 'chore: no changes';
+    if (files.length === 1) return `chore: update ${files[0]!.path}`;
+    return `chore: update ${files.length} files`;
+  }
+
+  /** Stage everything and commit (S2-09). Throws GitError('nothing to commit') when clean. */
+  async commitAll(repoPath: string, message: string): Promise<{ sha: string; message: string }> {
+    await this.git(repoPath, ['add', '-A']);
+    // git prints "nothing to commit" to stdout (not stderr), so check status instead.
+    const status = (await this.git(repoPath, ['status', '--porcelain'])).trim();
+    if (status === '') throw new GitError('nothing to commit');
+    await this.git(repoPath, [
+      '-c',
+      'user.name=PocketCode',
+      '-c',
+      'user.email=agent@pocketcode.local',
+      'commit',
+      '-m',
+      message,
+    ]);
+    const sha = (await this.git(repoPath, ['rev-parse', 'HEAD'])).trim();
+    return { sha, message };
+  }
+
+  /** Discard a single file's changes vs the index/HEAD (untracked ⇒ delete). Path-safe. */
+  async revertFile(repoPath: string, relPath: string): Promise<void> {
+    const abs = safeResolveWithin(repoPath, relPath);
+    const rel = relative(repoPath, abs);
+    const untracked =
+      (await this.git(repoPath, ['ls-files', '--others', '--exclude-standard', '--', rel])).trim() !== '';
+    if (untracked) {
+      rmSync(abs, { force: true });
+    } else {
+      await this.git(repoPath, ['restore', '--staged', '--worktree', '--', rel]);
+    }
+  }
+
+  /** Push the task branch to its remote (S2-09). Refuses anything but a claude/* branch. */
+  async pushBranch(repoPath: string, remote: string, branch: string): Promise<void> {
+    if (!branch.startsWith('claude/')) {
+      throw new GitError(`refusing to push non-claude branch: "${branch}"`);
+    }
+    await this.git(repoPath, ['push', '-u', remote, branch]);
   }
 }
 
