@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4) to fix a live 400; runner logging added
+**Last updated:** 2026-10-10 — S3-01 build service built on the dev machine (serial build queue + live log stream); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
 
 ---
 
@@ -18,6 +18,7 @@
 |------|-------|
 | Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
+| Daemon Sprint 3 (S3-01 build service) | 🟡 **built on dev machine** (typecheck clean, 114 tests) — not yet pulled/run here; no real `flutter build` exercised |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
@@ -68,6 +69,39 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S3-01 build service — built on the dev machine
+- New `BuildService` (`src/build/buildService.ts`): a **serial queue** (one build at a
+  time) that runs a project's manifest codegen steps then the APK build command, streaming
+  **every stdout/stderr line** to SQLite **event-log-first** and emitting it live. Build
+  lifecycle → `builds` table (`BuildStore`); log/lifecycle events → `build_events` table
+  (`BuildLog`, monotonic `seq`, `since()` replay — the build-side twin of `EventLog`).
+- **Staging-only guardrail enforced at build time:** `enqueue` calls `resolveBuildFlavor`
+  before the build row is created, so a forbidden flavor (e.g. `production` during the
+  pilot) is refused up front and no build is queued.
+- Steps come from the manifest: `[...codegen.steps, build.apk]` (codegen skippable via
+  `runCodegen:false`). The APK command supports `{flavor}` templating. If
+  `codegen.requiresSibling` is set and the sibling backend checkout is **missing**, the
+  build fails immediately with a clear message (the `dart-api-generator.sh` footgun from
+  the plan) instead of running a doomed step. Best-effort artifact discovery after success
+  (newest `build/app/outputs/flutter-apk/*.apk`) for S3-02 to upload.
+- **Command execution is shell-free** (`spawn`, no shell; whitespace-tokenized argv). The
+  step runner is injected (`RunStep`) so tests never spawn a real `flutter`.
+- New endpoints: `POST /projects/:id/builds` `{flavor?,taskId?,runCodegen?}` (201 → build
+  row; 409 on guardrail/inactive), `GET /projects/:id/builds`, `GET /builds/:id`,
+  `GET /builds/:id/logs?since=`, `POST /builds/:id/cancel`, and **WS `/builds/:id/stream?since=`**
+  (replay-then-tail, same shape as the task stream). Optional `taskId` builds a task's
+  reviewed worktree instead of the main checkout.
+- **Tested:** typecheck clean, **114/114** (12 new: 3 tokenizeCommand + 9 BuildService —
+  step order, codegen skip, **one-build-at-a-time concurrency=1**, non-zero step → failed +
+  pipeline stops, guardrail refusal, missing-sibling failure, cancel running, cancel queued,
+  seq-ordered replay). **Not exercised:** a real `flutter build apk` on the Mac.
+  **Not S3-01:** `caffeinate -i` wrap (S3-08), Firebase upload (S3-02), release notes (S3-03).
+- **Note:** `npm run lint` is pre-broken repo-wide (ESLint 9 wants `eslint.config.js`;
+  none exists). Typecheck is the gate; unaffected by this change.
+- **➡️ Action on this Mac:** `git pull` + restart to serve the build endpoints. The first
+  real build needs FVM/Flutter/Android toolchain + (for hedged codegen) the sibling
+  `../hedged-core-backend` checkout present; otherwise the build fails fast with that reason.
 
 ### 2026-10-10 — Project file search endpoint — built on the dev machine
 - `GET /projects/:id/search?q=` for @-mention autocomplete: recursive `searchFiles`

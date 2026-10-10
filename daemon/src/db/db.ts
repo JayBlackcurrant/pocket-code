@@ -72,6 +72,39 @@ CREATE TABLE IF NOT EXISTS approvals (
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id, status);
+
+-- Build jobs (S3-01). One build runs at a time (serial queue in BuildService). A build
+-- compiles a project (optionally a task's reviewed worktree) into an APK, streaming its
+-- log live. Artifact/upload metadata is filled in by later tasks (S3-02).
+CREATE TABLE IF NOT EXISTS builds (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL,
+  task_id     TEXT,                       -- optional: build a task's worktree
+  flavor      TEXT,
+  cwd         TEXT NOT NULL,              -- directory the build ran in
+  artifact    TEXT,                       -- produced APK path (best-effort)
+  status      TEXT NOT NULL,              -- queued | running | succeeded | failed | cancelled
+  exit_code   INTEGER,                    -- failing step's exit code
+  error       TEXT,                       -- short failure reason
+  created_at  INTEGER NOT NULL,
+  started_at  INTEGER,
+  finished_at INTEGER,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_builds_project ON builds(project_id, created_at);
+
+-- Append-only build log + lifecycle events. seq is monotonic per build, so a phone that
+-- disconnects mid-build can replay with since=<seq> over the build WebSocket (same shape
+-- as the task event log).
+CREATE TABLE IF NOT EXISTS build_events (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  build_id   TEXT NOT NULL,
+  type       TEXT NOT NULL,               -- build.created | build.started | build.step | build.log | build.completed | build.error | build.cancelled
+  payload    TEXT NOT NULL,               -- JSON
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (build_id) REFERENCES builds(id)
+);
+CREATE INDEX IF NOT EXISTS idx_build_events_build_seq ON build_events(build_id, seq);
 `;
 
 export function openDb(dbPath: string): Db {

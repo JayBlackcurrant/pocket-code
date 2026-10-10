@@ -3,8 +3,11 @@ import { loadProjectManifests } from './config/projectManifest.js';
 import { openDb } from './db/db.js';
 import { EventLog } from './db/eventLog.js';
 import { TaskStore } from './db/taskStore.js';
+import { BuildStore } from './db/buildStore.js';
+import { BuildLog } from './db/buildLog.js';
 import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
+import { BuildService } from './build/buildService.js';
 import { ProjectRegistry } from './registry/projectRegistry.js';
 import { buildServer } from './server.js';
 
@@ -15,6 +18,8 @@ async function main(): Promise<void> {
   const db = openDb(env.dbPath);
   const tasks = new TaskStore(db);
   const events = new EventLog(db);
+  const buildStore = new BuildStore(db);
+  const buildLog = new BuildLog(db);
   const git = new GitService();
   const runner = new AgentRunner({
     registry,
@@ -25,10 +30,12 @@ async function main(): Promise<void> {
     approvalTimeoutMs: env.approvalTimeoutMs,
     ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
   });
+  const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks });
 
-  const app = await buildServer({ env, registry, db, runner, tasks, events, git });
-  // Route the agent runner's logs through fastify's pino logger (same stream as HTTP logs).
+  const app = await buildServer({ env, registry, db, runner, tasks, events, git, builds });
+  // Route runner + build logs through fastify's pino logger (same stream as HTTP logs).
   runner.setLogger(app.log.child({ mod: 'agent' }));
+  builds.setLogger(app.log.child({ mod: 'build' }));
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');

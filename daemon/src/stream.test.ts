@@ -11,12 +11,21 @@ import { GitService, runGit } from './git/gitService.js';
 import { openDb, type Db } from './db/db.js';
 import { EventLog } from './db/eventLog.js';
 import { TaskStore } from './db/taskStore.js';
+import { BuildStore } from './db/buildStore.js';
+import { BuildLog } from './db/buildLog.js';
 import { AgentRunner, type QueryFn } from './agent/agentRunner.js';
+import { BuildService } from './build/buildService.js';
 import { createPairingCode, redeemPairingCode } from './auth/store.js';
 import { buildServer } from './server.js';
 import { loadEnv } from './config/env.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** A BuildService for server wiring in these task-stream tests (builds are exercised in
+ *  build/buildService.test.ts; here it just satisfies the server deps). */
+function mkBuilds(registry: ProjectRegistry, db: Db, tasks: TaskStore): BuildService {
+  return new BuildService({ registry, builds: new BuildStore(db), buildLog: new BuildLog(db), tasks });
+}
 
 function msg(type: string, extra: Record<string, unknown> = {}): SDKMessage {
   return { type, session_id: 'sess-1', ...extra } as unknown as SDKMessage;
@@ -83,7 +92,7 @@ async function rebuildWith(query: QueryFn): Promise<string> {
   await app.close();
   const tasks = new TaskStore(db);
   runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query });
-  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
+  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks) });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
   port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -181,7 +190,7 @@ beforeEach(async () => {
   const tasks = new TaskStore(db);
   events = new EventLog(db);
   runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: delayedQuery([], 0) });
-  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
+  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks) });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
   port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -208,7 +217,7 @@ describe('WS /tasks/:id/stream', () => {
     // rebuild server with this runner
     await app.close();
     const tasks = new TaskStore(db);
-    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
+    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks) });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const addr = app.server.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -251,7 +260,7 @@ describe('WS /tasks/:id/stream', () => {
     });
     await app.close();
     const tasks = new TaskStore(db);
-    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
+    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks) });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const addr = app.server.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;

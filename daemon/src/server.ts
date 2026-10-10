@@ -25,7 +25,9 @@ import type { AgentRunner } from './agent/agentRunner.js';
 import type { TaskStore } from './db/taskStore.js';
 import type { EventLog, StoredEvent } from './db/eventLog.js';
 import { GitError, type GitService } from './git/gitService.js';
-import { branchBlockedReason } from './guardrails.js';
+import { branchBlockedReason, GuardrailError } from './guardrails.js';
+import { BuildService, BuildError } from './build/buildService.js';
+import type { StoredBuildEvent } from './db/buildLog.js';
 
 export interface ServerDeps {
   env: DaemonEnv;
@@ -35,6 +37,7 @@ export interface ServerDeps {
   tasks: TaskStore;
   events: EventLog;
   git: GitService;
+  builds: BuildService;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */
@@ -81,6 +84,12 @@ const DecisionBody = z.object({
 const DiffQuery = z.object({ path: z.string().min(1) });
 const CommitBody = z.object({ message: z.string().min(1).max(2000).optional() });
 const RevertBody = z.object({ path: z.string().min(1) });
+
+const CreateBuildBody = z.object({
+  flavor: z.string().min(1).max(100).optional(),
+  taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(),
+  runCodegen: z.boolean().optional(),
+});
 
 /** Base ref to diff a task against: its project's manifest git.base. */
 function taskBaseRef(deps: ServerDeps, projectId: string): string | undefined {
@@ -435,6 +444,131 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
     return reply.code(202).send({ status: 'cancelling' });
   });
+
+  // --- Builds (S3-01) --------------------------------------------------------
+
+  // Queue a build for a project (optionally a task's reviewed worktree). One build runs
+  // at a time; the staging-only flavor guardrail is enforced before the build is created.
+  app.post<{ Params: { id: string } }>('/projects/:id/builds', auth, async (req, reply) => {
+    const parsed = CreateBuildBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+    }
+    const project = deps.registry.get(req.params.id);
+    if (!project) return reply.code(404).send({ error: 'unknown project' });
+    if (project.status !== 'active') {
+      return reply.code(409).send({ error: `project not active: ${project.reason ?? project.status}` });
+    }
+    try {
+      const build = deps.builds.enqueue({
+        projectId: req.params.id,
+        ...(parsed.data.flavor !== undefined ? { flavor: parsed.data.flavor } : {}),
+        ...(parsed.data.taskId !== undefined ? { taskId: parsed.data.taskId } : {}),
+        ...(parsed.data.runCodegen !== undefined ? { runCodegen: parsed.data.runCodegen } : {}),
+      });
+      return reply.code(201).send(build);
+    } catch (err) {
+      if (err instanceof GuardrailError || err instanceof BuildError) {
+        return reply.code(409).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // Builds for a project, newest first.
+  app.get<{ Params: { id: string } }>('/projects/:id/builds', auth, async (req, reply) => {
+    const project = deps.registry.get(req.params.id);
+    if (!project) return reply.code(404).send({ error: 'unknown project' });
+    return { builds: deps.builds.listForProject(req.params.id) };
+  });
+
+  // One build's status.
+  app.get<{ Params: { id: string } }>('/builds/:id', auth, async (req, reply) => {
+    const build = deps.builds.get(req.params.id);
+    if (!build) return reply.code(404).send({ error: 'unknown build' });
+    return build;
+  });
+
+  // Replay a build's log (catch-up read; the WebSocket below tails it live).
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>(
+    '/builds/:id/logs',
+    auth,
+    async (req, reply) => {
+      if (!deps.builds.get(req.params.id)) return reply.code(404).send({ error: 'unknown build' });
+      const q = EventsQuery.safeParse(req.query);
+      if (!q.success) return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
+      return { events: deps.builds.logsSince(req.params.id, q.data.since) };
+    },
+  );
+
+  // Cancel a queued or running build.
+  app.post<{ Params: { id: string } }>('/builds/:id/cancel', auth, async (req, reply) => {
+    const build = deps.builds.get(req.params.id);
+    if (!build) return reply.code(404).send({ error: 'unknown build' });
+    const cancelling = deps.builds.cancel(req.params.id);
+    if (!cancelling) return reply.code(409).send({ error: `build already ${build.status}` });
+    return reply.code(202).send({ status: 'cancelling' });
+  });
+
+  // Live build log with replay (same shape as the task stream): replay everything after
+  // `since` from SQLite, then tail live. A reconnecting phone passes its last seen seq.
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>(
+    '/builds/:id/stream',
+    { websocket: true, preHandler: requireAuth(deps.db) },
+    (socket, req) => {
+      const buildId = req.params.id;
+      if (!deps.builds.get(buildId)) {
+        socket.send(JSON.stringify({ type: 'stream.error', error: 'unknown build' }));
+        socket.close(1008, 'unknown build');
+        return;
+      }
+      const q = EventsQuery.safeParse(req.query);
+      const since = q.success ? q.data.since : 0;
+
+      let lastSent = since;
+      let live = false;
+      const buffered: StoredBuildEvent[] = [];
+      const send = (e: StoredBuildEvent): void => {
+        try {
+          socket.send(
+            JSON.stringify({ seq: e.seq, buildId: e.buildId, type: e.type, payload: e.payload, createdAt: e.createdAt }),
+          );
+        } catch {
+          /* socket closed mid-send */
+        }
+      };
+
+      // Subscribe BEFORE reading the DB so nothing emitted during replay is missed.
+      const unsub = deps.builds.onEvent((e) => {
+        if (e.buildId !== buildId) return;
+        if (!live) {
+          buffered.push(e);
+          return;
+        }
+        if (e.seq > lastSent) {
+          send(e);
+          lastSent = e.seq;
+        }
+      });
+
+      for (const e of deps.builds.logsSince(buildId, since)) {
+        send(e);
+        lastSent = e.seq;
+      }
+      live = true;
+      for (const e of buffered) {
+        if (e.seq > lastSent) {
+          send(e);
+          lastSent = e.seq;
+        }
+      }
+      buffered.length = 0;
+      socket.send(JSON.stringify({ type: 'stream.caughtup', lastSeq: lastSent }));
+
+      socket.on('close', unsub);
+      socket.on('error', unsub);
+    },
+  );
 
   // Live event stream with replay (S1-06): replay everything after `since` from SQLite,
   // then tail live events. A reconnecting phone passes its last seen seq, so no events
