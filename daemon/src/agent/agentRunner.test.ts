@@ -113,6 +113,7 @@ describe('AgentRunner', () => {
       git: new GitService(),
       tasks,
       events,
+      db,
       query: fakeQuery([sysInit, assistant, resultOk]),
     });
 
@@ -146,6 +147,7 @@ describe('AgentRunner', () => {
       git: new GitService(),
       tasks,
       events,
+      db,
       query: fakeQuery([sysInit, resultErr]),
     });
     const started = await runner.start({ projectId: 'hedged', prompt: 'boom task' });
@@ -162,6 +164,7 @@ describe('AgentRunner', () => {
       git: new GitService(),
       tasks,
       events,
+      db,
       query: fakeQuery([sysInit, assistant, resultOk]),
     });
     const started = await runner.start({ projectId: 'hedged', prompt: 'replay me' });
@@ -178,6 +181,7 @@ describe('AgentRunner', () => {
       git: new GitService(),
       tasks,
       events,
+      db,
       query: cancellableQuery(),
     });
     const started = await runner.start({ projectId: 'hedged', prompt: 'long task' });
@@ -187,7 +191,7 @@ describe('AgentRunner', () => {
   });
 
   it('rejects an unknown or inactive project', async () => {
-    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, query: fakeQuery([]) });
+    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: fakeQuery([]) });
     await expect(runner.start({ projectId: 'nope', prompt: 'x' })).rejects.toThrow(/not active/);
   });
 });

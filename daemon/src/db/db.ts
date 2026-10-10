@@ -56,6 +56,22 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
   expires_at  INTEGER NOT NULL,
   consumed_at INTEGER                       -- NULL until redeemed
 );
+
+-- Pending/decided tool-permission requests (canUseTool bridge, S2-01). The agent parks
+-- on a request; the phone resolves it via the permissions endpoint. Persisted so a
+-- reconnecting phone can see what is waiting.
+CREATE TABLE IF NOT EXISTS approvals (
+  id          TEXT PRIMARY KEY,            -- the SDK toolUseID
+  task_id     TEXT NOT NULL,
+  tool_name   TEXT NOT NULL,
+  input       TEXT NOT NULL,               -- JSON
+  status      TEXT NOT NULL,               -- pending | allowed | denied
+  reason      TEXT,                        -- denial reason / note
+  created_at  INTEGER NOT NULL,
+  decided_at  INTEGER,
+  FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id, status);
 `;
 
 export function openDb(dbPath: string): Db {

@@ -61,6 +61,12 @@ const EventsQuery = z.object({
   since: z.coerce.number().int().min(0).default(0),
 });
 
+const DecisionBody = z.object({
+  decision: z.enum(['allow', 'deny']),
+  reason: z.string().max(2000).optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+});
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -169,6 +175,32 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const q = EventsQuery.safeParse(req.query);
       if (!q.success) return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
       return { events: deps.events.since(req.params.id, q.data.since) };
+    },
+  );
+
+  // Pending tool-permission requests for a task (S2-01) — e.g. after reconnect.
+  app.get<{ Params: { id: string } }>('/tasks/:id/permissions', auth, async (req, reply) => {
+    if (!deps.tasks.get(req.params.id)) return reply.code(404).send({ error: 'unknown task' });
+    return { pending: deps.runner.listPendingPermissions(req.params.id) };
+  });
+
+  // Approve or deny a parked tool call (S2-01). Resolves the agent's canUseTool promise.
+  app.post<{ Params: { id: string; toolUseId: string } }>(
+    '/tasks/:id/permissions/:toolUseId',
+    auth,
+    async (req, reply) => {
+      if (!deps.tasks.get(req.params.id)) return reply.code(404).send({ error: 'unknown task' });
+      const parsed = DecisionBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+      }
+      const ok = deps.runner.decidePermission(req.params.id, req.params.toolUseId, {
+        allow: parsed.data.decision === 'allow',
+        ...(parsed.data.reason !== undefined ? { reason: parsed.data.reason } : {}),
+        ...(parsed.data.input !== undefined ? { input: parsed.data.input } : {}),
+      });
+      if (!ok) return reply.code(404).send({ error: 'no pending permission with that id' });
+      return { decided: parsed.data.decision };
     },
   );
 

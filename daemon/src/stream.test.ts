@@ -57,10 +57,32 @@ function cancellableQuery(): QueryFn {
   };
 }
 
+/** Fake query that requests tool permission via canUseTool, then reports the outcome. */
+function canUseToolQuery(): QueryFn {
+  return ({ options }) => {
+    const gen = (async function* () {
+      yield msg('system', { subtype: 'init' });
+      const res = await options!.canUseTool!('Bash', { command: 'ls' }, {
+        toolUseID: 'tu1',
+        signal: options!.abortController!.signal,
+      } as never);
+      yield msg('assistant', {
+        message: {
+          content: [{ type: 'text', text: res.behavior }],
+        },
+      });
+      yield msg('result', { subtype: 'success', is_error: false, total_cost_usd: 0.01 });
+    })();
+    const q = gen as unknown as Query;
+    (q as unknown as { interrupt: () => Promise<void> }).interrupt = async () => undefined;
+    return q;
+  };
+}
+
 async function rebuildWith(query: QueryFn): Promise<string> {
   await app.close();
   const tasks = new TaskStore(db);
-  runner = new AgentRunner({ registry, git: new GitService(), tasks, events, query });
+  runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query });
   app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
@@ -158,7 +180,7 @@ beforeEach(async () => {
   db = openDb(':memory:');
   const tasks = new TaskStore(db);
   events = new EventLog(db);
-  runner = new AgentRunner({ registry, git: new GitService(), tasks, events, query: delayedQuery([], 0) });
+  runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: delayedQuery([], 0) });
   app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
@@ -300,5 +322,60 @@ describe('POST /tasks/:id/cancel', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('tool permissions (S2-01)', () => {
+  it('parks a tool call until the phone approves, then resumes', async () => {
+    token = await rebuildWith(canUseToolQuery());
+    const auth = { authorization: `Bearer ${token}` };
+
+    const startRes = await fetch(`http://127.0.0.1:${port}/projects/hedged/tasks`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'needs a tool' }),
+    });
+    const { taskId } = (await startRes.json()) as { taskId: string };
+
+    // Poll until the agent has parked on the permission (it waits here indefinitely).
+    let pending: Array<{ id: string; toolName: string }> = [];
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`http://127.0.0.1:${port}/tasks/${taskId}/permissions`, { headers: auth });
+      pending = (await r.json() as { pending: typeof pending }).pending;
+      if (pending.length > 0) break;
+      await sleep(20);
+    }
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.toolName).toBe('Bash');
+
+    // Task is parked in `waiting`, not finished.
+    const mid = await (await fetch(`http://127.0.0.1:${port}/tasks/${taskId}`, { headers: auth })).json();
+    expect(mid.status).toBe('waiting');
+
+    // Approve from the phone → agent resumes.
+    const dec = await fetch(
+      `http://127.0.0.1:${port}/tasks/${taskId}/permissions/${pending[0]!.id}`,
+      {
+        method: 'POST',
+        headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ decision: 'allow' }),
+      },
+    );
+    expect(dec.status).toBe(200);
+
+    await runner.whenSettled(taskId);
+    const done = await (await fetch(`http://127.0.0.1:${port}/tasks/${taskId}`, { headers: auth })).json();
+    expect(done.status).toBe('done');
+
+    // Deciding again → 404 (no longer pending).
+    const again = await fetch(
+      `http://127.0.0.1:${port}/tasks/${taskId}/permissions/${pending[0]!.id}`,
+      {
+        method: 'POST',
+        headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ decision: 'allow' }),
+      },
+    );
+    expect(again.status).toBe(404);
   });
 });

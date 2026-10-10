@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-09 — by Claude Code on the always-on Mac (`kisans-macbook-air`)
+**Last updated:** 2026-10-10 — S2-01 daemon code added from the dev machine (needs pull+restart here)
 
 ---
 
@@ -16,7 +16,8 @@
 
 | Area | State |
 |------|-------|
-| Daemon code (Sprint 1 scaffold: S1-01…S1-07) | ✅ present & passing (44/44 tests, typecheck clean) |
+| Daemon code (Sprint 1: S1-01…S1-07) | ✅ present & passing |
+| Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** (50/50 tests) |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
@@ -61,6 +62,25 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S2-01 approvals (canUseTool bridge) — built on the dev machine
+Daemon code for **S2-01** landed (authored from the dev Mac; this Mac must `git pull` +
+restart to run it):
+- New `src/agent/permissionBroker.ts`: tool calls needing permission **park** (persisted to a
+  new `approvals` table, status `pending`), emit `agent.permission_request`, and the agent
+  waits on an unresolved promise — even while the phone is offline. The phone resolves via a
+  new endpoint and the agent resumes; abort/cancel settles as deny+interrupt.
+- `AgentRunner` now passes `canUseTool` into `query()` and exposes
+  `decidePermission` / `listPendingPermissions`; task goes `waiting` while parked, back to
+  `running` on a decision. Edits still auto-accept (`acceptEdits`); other tools (Bash, etc.)
+  route to the phone.
+- New endpoints: `GET /tasks/:id/permissions` (list pending, for reconnect) and
+  `POST /tasks/:id/permissions/:toolUseId` `{decision:'allow'|'deny', reason?, input?}`.
+- **Tested:** typecheck clean; **50/50** tests (new `permissionBroker.test.ts` + an HTTP
+  integration test: agent parks → `waiting` → phone approves → resumes → `done` → re-decide 404).
+- **Not an auto-allow list yet** — every non-edit tool currently asks. Allow/deny rules +
+  `acceptEdits` tuning are **S2-02**. App-side approval cards are **S2-04**.
+- **➡️ Action on this Mac:** `cd ~/workspaces/pocket-code && git pull` then restart the daemon.
 
 ### 2026-10-09 — Mac setup from a clean clone (`AGENT_MAC_SETUP.md`)
 Performed the full agent-Mac setup and verified end-to-end:

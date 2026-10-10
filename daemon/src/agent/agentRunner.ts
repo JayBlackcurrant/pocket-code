@@ -12,6 +12,8 @@ import type { ProjectRegistry } from '../registry/projectRegistry.js';
 import type { GitService } from '../git/gitService.js';
 import type { TaskStore } from '../db/taskStore.js';
 import type { EventLog, StoredEvent } from '../db/eventLog.js';
+import type { Db } from '../db/db.js';
+import { PermissionBroker, type Decision, type PendingPermission } from './permissionBroker.js';
 
 /** The slice of the SDK `query()` the runner uses — injectable for testing. */
 export type QueryFn = (params: { prompt: string; options?: Options }) => Query;
@@ -21,6 +23,7 @@ export interface AgentRunnerDeps {
   git: GitService;
   tasks: TaskStore;
   events: EventLog;
+  db: Db;
   /** Defaults to the real SDK `query()`. Tests pass a fake generator. */
   query?: QueryFn;
   /** Permission mode for runs. Never `bypassPermissions` (CLAUDE.md). */
@@ -70,6 +73,7 @@ export class AgentRunner {
   private readonly emitter = new EventEmitter();
   private readonly running = new Map<string, { query: Query; abort: AbortController }>();
   private readonly settled = new Map<string, Promise<void>>();
+  private readonly broker: PermissionBroker;
 
   constructor(deps: AgentRunnerDeps) {
     this.registry = deps.registry;
@@ -81,6 +85,17 @@ export class AgentRunner {
     if (this.defaultPermissionMode === 'bypassPermissions') {
       throw new Error('bypassPermissions is not allowed');
     }
+    this.broker = new PermissionBroker(deps.db, (t, ty, p) => this.persist(t, ty, p), deps.tasks);
+  }
+
+  /** Resolve a pending tool permission from the phone (S2-01). */
+  decidePermission(taskId: string, toolUseId: string, decision: Decision): boolean {
+    return this.broker.decide(taskId, toolUseId, decision);
+  }
+
+  /** Permissions still waiting on a decision for a task. */
+  listPendingPermissions(taskId: string): PendingPermission[] {
+    return this.broker.listPending(taskId);
   }
 
   /** Subscribe to persisted events (used by the WebSocket layer, S1-06). */
@@ -140,7 +155,10 @@ export class AgentRunner {
       baseRef: worktree.baseRef,
     });
 
-    const run = this.runAgent(taskId, worktree.path, input).finally(() => this.running.delete(taskId));
+    const run = this.runAgent(taskId, worktree.path, input).finally(() => {
+      this.running.delete(taskId);
+      this.broker.clearTask(taskId);
+    });
     this.settled.set(taskId, run);
     run.catch(() => {
       /* failures are recorded as events; never crash the daemon */
@@ -155,6 +173,10 @@ export class AgentRunner {
       cwd,
       abortController: abort,
       permissionMode: this.defaultPermissionMode,
+      // The canUseTool bridge (S2-01): tools needing permission park until the phone
+      // decides. Edits are auto-accepted by `acceptEdits`; other tools come through here.
+      canUseTool: (toolName, toolInput, opts) =>
+        this.broker.request(taskId, opts.toolUseID, toolName, toolInput, opts.signal),
       ...(input.model !== undefined ? { model: input.model } : {}),
     };
 
