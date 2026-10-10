@@ -27,6 +27,8 @@ async function main(): Promise<void> {
   });
 
   const app = await buildServer({ env, registry, db, runner, tasks, events, git });
+  // Route the agent runner's logs through fastify's pino logger (same stream as HTTP logs).
+  runner.setLogger(app.log.child({ mod: 'agent' }));
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');

@@ -19,6 +19,31 @@ import { PermissionBroker, type Decision, type PendingPermission } from './permi
 import { evaluatePermission } from './permissionRules.js';
 import { defaultSandbox } from './sandbox.js';
 
+/** Minimal structured logger; a pino logger (fastify's `app.log`) satisfies it. */
+export interface RunnerLogger {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
+function serializeError(err: unknown): Record<string, unknown> {
+  return err instanceof Error
+    ? { name: err.name, message: err.message, stack: err.stack }
+    : { value: String(err) };
+}
+
+/** Fallback logger when none is injected: one JSON line per event. */
+function fmtLog(level: string, obj: unknown, msg?: string): string {
+  const fields = typeof obj === 'object' && obj !== null ? obj : { value: obj };
+  return JSON.stringify({ level, time: Date.now(), mod: 'agent', msg, ...fields });
+}
+
+const defaultLogger: RunnerLogger = {
+  info: (obj, msg) => console.log(fmtLog('info', obj, msg)),
+  warn: (obj, msg) => console.warn(fmtLog('warn', obj, msg)),
+  error: (obj, msg) => console.error(fmtLog('error', obj, msg)),
+};
+
 /** The slice of the SDK `query()` the runner uses — injectable for testing. */
 export type QueryFn = (params: { prompt: string; options?: Options }) => Query;
 
@@ -36,6 +61,8 @@ export interface AgentRunnerDeps {
   sandbox?: SandboxSettings | false;
   /** Deny a parked permission after this long (ms). Omit for the default (2h). */
   approvalTimeoutMs?: number;
+  /** Structured logger (e.g. fastify's `app.log`). Defaults to JSON-to-console. */
+  logger?: RunnerLogger;
 }
 
 export interface StartTaskInput {
@@ -78,6 +105,7 @@ export class AgentRunner {
   private readonly query: QueryFn;
   private readonly defaultPermissionMode: PermissionMode;
   private readonly sandbox: SandboxSettings | undefined;
+  private log: RunnerLogger;
 
   private readonly emitter = new EventEmitter();
   private readonly running = new Map<string, { query: Query; abort: AbortController }>();
@@ -101,6 +129,12 @@ export class AgentRunner {
       deps.approvalTimeoutMs,
     );
     this.sandbox = deps.sandbox === false ? undefined : (deps.sandbox ?? defaultSandbox());
+    this.log = deps.logger ?? defaultLogger;
+  }
+
+  /** Swap in a real logger after construction (index.ts passes fastify's app.log). */
+  setLogger(logger: RunnerLogger): void {
+    this.log = logger;
   }
 
   /** Resolve a pending tool permission from the phone (S2-01). */
@@ -130,6 +164,7 @@ export class AgentRunner {
   }
 
   private fail(taskId: string, stage: string, err: unknown): void {
+    this.log.error({ taskId, stage, err: serializeError(err) }, 'task failed');
     this.tasks.setStatus(taskId, 'failed');
     this.persist(taskId, 'task.error', { stage, message: err instanceof Error ? err.message : String(err) });
   }
@@ -169,6 +204,10 @@ export class AgentRunner {
       worktree: worktree.path,
       baseRef: worktree.baseRef,
     });
+    this.log.info(
+      { taskId, projectId: manifest.id, branch: worktree.branch, model: input.model ?? null },
+      'task started',
+    );
 
     const run = this.runAgent(taskId, worktree.path, input).finally(() => {
       this.running.delete(taskId);
@@ -233,7 +272,21 @@ export class AgentRunner {
           this.tasks.setSession(taskId, sid);
           sessionStored = true;
         }
-        if (msg.type === 'result') result = msg;
+        if (msg.type === 'result') {
+          result = msg;
+          if (msg.is_error) {
+            this.log.error(
+              {
+                taskId,
+                sessionId: msg.session_id,
+                subtype: msg.subtype,
+                // For an error result the SDK puts the API error text (incl. request_id) here.
+                result: (msg as { result?: unknown }).result ?? null,
+              },
+              'agent run returned an error result',
+            );
+          }
+        }
       }
     } catch (err) {
       if (abort.signal.aborted) {
@@ -257,6 +310,7 @@ export class AgentRunner {
         costUsd: result.total_cost_usd,
         sessionId: result.session_id,
       });
+      this.log.info({ taskId, status, costUsd: result.total_cost_usd }, 'task completed');
     } else {
       // Stream ended without a result message.
       this.tasks.setStatus(taskId, 'done');
