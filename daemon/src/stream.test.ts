@@ -17,6 +17,8 @@ import { AgentRunner, type QueryFn } from './agent/agentRunner.js';
 import { BuildService } from './build/buildService.js';
 import { DistributionService } from './build/distributionService.js';
 import { ReleaseNotesService } from './build/releaseNotes.js';
+import { NotificationStore } from './db/notificationStore.js';
+import { NotificationService } from './notify/notificationService.js';
 import { createPairingCode, redeemPairingCode } from './auth/store.js';
 import { buildServer } from './server.js';
 import { loadEnv } from './config/env.js';
@@ -36,6 +38,15 @@ function mkDistribution(registry: ProjectRegistry, db: Db): DistributionService 
 function mkReleaseNotes(registry: ProjectRegistry, db: Db): ReleaseNotesService {
   // query: null → no live SDK calls in these task-stream tests (diff fallback only).
   return new ReleaseNotesService({ registry, tasks: new TaskStore(db), git: new GitService(), query: null });
+}
+
+function mkNotifications(runner: AgentRunner, db: Db): NotificationService {
+  return new NotificationService({
+    store: new NotificationStore(db),
+    tasks: runner,
+    builds: { onEvent: () => () => {} },
+    buildLookup: { get: () => undefined },
+  });
 }
 
 function msg(type: string, extra: Record<string, unknown> = {}): SDKMessage {
@@ -103,7 +114,7 @@ async function rebuildWith(query: QueryFn): Promise<string> {
   await app.close();
   const tasks = new TaskStore(db);
   runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query });
-  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db) });
+  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db), notifications: mkNotifications(runner, db) });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
   port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -201,7 +212,7 @@ beforeEach(async () => {
   const tasks = new TaskStore(db);
   events = new EventLog(db);
   runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: delayedQuery([], 0) });
-  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db) });
+  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db), notifications: mkNotifications(runner, db) });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
   port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -228,7 +239,7 @@ describe('WS /tasks/:id/stream', () => {
     // rebuild server with this runner
     await app.close();
     const tasks = new TaskStore(db);
-    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db) });
+    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db), notifications: mkNotifications(runner, db) });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const addr = app.server.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -271,7 +282,7 @@ describe('WS /tasks/:id/stream', () => {
     });
     await app.close();
     const tasks = new TaskStore(db);
-    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db) });
+    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService(), builds: mkBuilds(registry, db, tasks), distribution: mkDistribution(registry, db), releaseNotes: mkReleaseNotes(registry, db), notifications: mkNotifications(runner, db) });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const addr = app.server.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;

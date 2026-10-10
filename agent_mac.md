@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — S3-01/02/03/04 + S3-08 built on the dev machine (build queue + live log + distribute + AI notes + failure tail/retry + caffeinate); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
+**Last updated:** 2026-10-10 — Sprint 3 daemon complete: S3-01/02/03/04/05/08 (build queue + live log + distribute + AI notes + failure tail/retry + caffeinate + self-contained notifications); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
 
 ---
 
@@ -18,7 +18,8 @@
 |------|-------|
 | Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
-| Daemon Sprint 3 (S3-01/02/03/04/08) | 🟡 **built on dev machine** (typecheck clean, 142 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised. S3-05 (FCM) still to do. |
+| Daemon Sprint 3 (S3-01/02/03/04/05/08) | 🟡 **built on dev machine** (typecheck clean, 150 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised. **Sprint 3 daemon complete.** |
+| Notifications (S3-05) | ✅ self-contained — daemon derives notifications from task/build events; phone reads over tailnet (live + replay). ⚠️ no off-tailnet push (needs an external relay; see log) |
 | Firebase App Distribution (hedged staging) | ⬜ **not provisioned** — manifest `appId`/`groups` are still `<placeholders>`; upload refuses until a real staging app id + tester group + service-account creds exist |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
@@ -70,6 +71,29 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S3-05 notifications (self-contained, no external push) — built on the dev machine
+- **Decision (user):** "use the service which starts with the daemon and ends with it, no
+  extra" → notifications are **daemon-only**, no Firebase/FCM/ntfy/Gotify, no app, no account.
+  (No Firebase project was created — I can't, and it wasn't wanted for notifications. The
+  separate S3-02 App-Distribution Firebase app is still unprovisioned and unrelated.)
+- **How:** new `NotificationService` (`src/notify/`) **subscribes to the existing** task event
+  stream (`runner.onEvent`) and build log (`buildLog.onEvent`) — the services themselves are
+  untouched — and translates notification-worthy events into stored notifications
+  (`notifications` table, monotonic seq) via pure, tested `notificationFeed` mappers. Build
+  notifications resolve their task id via `BuildStore` for deep-linking.
+- **Kinds:** approval / taskDone / taskFailed / buildReady / buildFailed / shipped /
+  uploadFailed. **Content-safe** (title + short body only; reasons clipped; no code/secrets).
+- **Endpoints:** `GET /notifications` (recent + unread), `POST /notifications/read` `{upTo}`,
+  **WS `/notifications/stream?since=`** (replay-then-tail, like the task stream).
+- **⚠️ Limitation:** a daemon-only design **cannot wake the phone when it's off Tailscale** —
+  true OS push needs an external relay (FCM/ntfy). Notifications surface in-app when connected
+  and **catch up on reconnect** (replay by seq). If off-tailnet push is wanted later, add an
+  ntfy POST in `NotificationService` as a second sink — the seam is ready.
+- **Tested:** typecheck clean, **150/150** (8 new: feed mappers for task/build/upload, service
+  persists+emits, ignores non-events, build→task resolution, unread/markRead, replay-by-seq,
+  dispose). **Not exercised:** the live WS end-to-end from the phone (needs the Mac serving it).
+- **➡️ Action on this Mac:** `git pull` + restart (serves the notifications endpoints + WS).
 
 ### 2026-10-10 — S3-08 caffeinate wrapper for long jobs — built on the dev machine
 - Build **and** upload steps now run under **`caffeinate -i`** so the Mac can't idle-sleep

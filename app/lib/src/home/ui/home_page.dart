@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../../notifications/providers/notifications_stream.dart';
 import '../../routes/app_router.dart';
 import '../../shared/providers/pairing_provider.dart';
 import '../providers/projects_provider.dart';
@@ -16,10 +17,21 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final projects = ref.watch(projectsProvider);
+    final unread =
+        ref.watch(notificationsStreamProvider.select((s) => s.unread));
     return Scaffold(
       appBar: AppBar(
         title: const Text('Projects'),
         actions: [
+          IconButton(
+            tooltip: 'Notifications',
+            icon: Badge(
+              isLabelVisible: unread > 0,
+              label: Text('$unread'),
+              child: const Icon(Icons.notifications_none),
+            ),
+            onPressed: () => context.router.push(const NotificationsRoute()),
+          ),
           IconButton(
             tooltip: 'Unpair',
             icon: const Icon(Icons.logout),

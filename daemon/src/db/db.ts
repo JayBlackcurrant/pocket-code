@@ -110,6 +110,21 @@ CREATE TABLE IF NOT EXISTS build_events (
   FOREIGN KEY (build_id) REFERENCES builds(id)
 );
 CREATE INDEX IF NOT EXISTS idx_build_events_build_seq ON build_events(build_id, seq);
+
+-- User-facing notifications (S3-05). Self-contained: the daemon derives these from task /
+-- build / upload outcomes and the phone reads them over the tailnet (live + replay by seq).
+-- Content-safe: title/body only, never code or secrets (CLAUDE.md). seq is monotonic.
+CREATE TABLE IF NOT EXISTS notifications (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL,               -- approval | taskDone | taskFailed | buildReady | buildFailed | shipped | uploadFailed
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  task_id    TEXT,                         -- deep-link target, if any
+  build_id   TEXT,
+  created_at INTEGER NOT NULL,
+  read_at    INTEGER                       -- NULL while unread
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_seq ON notifications(seq);
 `;
 
 /** Add a column if it is not already present. Lets a DB created by an earlier task pick up

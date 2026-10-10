@@ -4,6 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../builds/ui/builds_page.dart';
 import '../home/ui/home_page.dart';
+import '../notifications/ui/notifications_page.dart';
 import '../pairing/ui/pairing_page.dart';
 import '../project/ui/project_file_page.dart';
 import '../project/ui/project_page.dart';
@@ -71,6 +72,11 @@ class AppRouter extends RootStackRouter {
         AutoRoute(
           page: BuildsRoute.page,
           path: '/tasks/:taskId/build',
+          guards: [PairingGuard(_ref)],
+        ),
+        AutoRoute(
+          page: NotificationsRoute.page,
+          path: '/notifications',
           guards: [PairingGuard(_ref)],
         ),
         AutoRoute(page: PairingRoute.page, path: '/pair'),

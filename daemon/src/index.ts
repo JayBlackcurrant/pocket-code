@@ -10,6 +10,8 @@ import { AgentRunner } from './agent/agentRunner.js';
 import { BuildService, makeSpawnRunStep } from './build/buildService.js';
 import { DistributionService } from './build/distributionService.js';
 import { ReleaseNotesService } from './build/releaseNotes.js';
+import { NotificationStore } from './db/notificationStore.js';
+import { NotificationService } from './notify/notificationService.js';
 import { ProjectRegistry } from './registry/projectRegistry.js';
 import { buildServer } from './server.js';
 
@@ -37,6 +39,13 @@ async function main(): Promise<void> {
   const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks, runStep });
   const distribution = new DistributionService({ registry, builds: buildStore, buildLog, runStep });
   const releaseNotes = new ReleaseNotesService({ registry, tasks, git });
+  // Self-contained notifications (S3-05): derived from the existing task + build event streams.
+  const notifications = new NotificationService({
+    store: new NotificationStore(db),
+    tasks: runner,
+    builds: buildLog,
+    buildLookup: buildStore,
+  });
 
   const app = await buildServer({
     env,
@@ -49,6 +58,7 @@ async function main(): Promise<void> {
     builds,
     distribution,
     releaseNotes,
+    notifications,
   });
   // Route runner + build logs through fastify's pino logger (same stream as HTTP logs).
   runner.setLogger(app.log.child({ mod: 'agent' }));

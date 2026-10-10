@@ -26,6 +26,7 @@
 | Git actions (S2-09 app) | ✅ done — commit/push/discard menu + long-press revert on review screen |
 | Builds screen (S3-06) | ✅ done — Build & ship screen: start build, live log (WS), editable AI release notes, group field, upload, Firebase link, retry |
 | Biometric gate (S3-07) | ✅ done — `local_auth` gate on push, build/retry, upload (distribute), and "always allow"; fails closed |
+| Notifications inbox (S3-05) | ✅ done — global keepAlive WS inbox + unread badge; in-app only (daemon-driven, no external push) |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
 > instruction; `CLAUDE.md` repo-layout line updated accordingly). S1-09 and S1-10 are **built
@@ -78,6 +79,22 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S3-05 notifications inbox (self-contained)
+- New `src/notifications/` feature consuming the daemon's self-contained notifications
+  (no external push — see `agent_mac.md`). `NotificationsStream` (**keepAlive**) loads recent
+  via `GET /notifications`, then live-tails **WS `/notifications/stream?since=`** with reconnect;
+  tracks unread. Home gets a **bell + unread Badge**; tapping opens `NotificationsPage`
+  (route `/notifications`), which marks all read (`POST /notifications/read`) on open and
+  **deep-links** each item to its task (`TaskRoute`).
+- New files: `notifications/models/app_notification.dart`, `models/notifications_state.dart`,
+  `providers/notifications_stream.dart`, `ui/notifications_page.dart`; route + home bell.
+- **⚠️ In-app only:** this surfaces notifications when the app is open/connected over Tailscale
+  and catches up on reconnect — it does **not** show OS tray notifications when the app is
+  closed / off-tailnet (that needs an external push relay, deliberately out of scope per the
+  "no extra service" decision). No `flutter_local_notifications` dep added.
+- **Tested:** `analyze` clean, `flutter test` **41/41** (3 new AppNotification model cases),
+  `flutter build bundle` compiles. The live WS/inbox flow isn't widget-tested; verify on device.
 
 ### 2026-10-10 — S3-07 biometric gate for sensitive actions
 - New `src/security/`: `BiometricGate` wraps a `LocalAuthenticator` seam (default

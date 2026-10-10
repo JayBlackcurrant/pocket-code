@@ -30,6 +30,8 @@ import { BuildService, BuildError } from './build/buildService.js';
 import { DistributionService, DistributionError } from './build/distributionService.js';
 import { ReleaseNotesService, ReleaseNotesError } from './build/releaseNotes.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
+import type { NotificationService } from './notify/notificationService.js';
+import type { NotificationRow } from './db/notificationStore.js';
 
 export interface ServerDeps {
   env: DaemonEnv;
@@ -42,6 +44,7 @@ export interface ServerDeps {
   builds: BuildService;
   distribution: DistributionService;
   releaseNotes: ReleaseNotesService;
+  notifications: NotificationService;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */
@@ -103,6 +106,8 @@ const UploadBuildBody = z.object({
 const BuildTailQuery = z.object({
   tail: z.coerce.number().int().min(0).max(500).default(20),
 });
+
+const MarkReadBody = z.object({ upTo: z.coerce.number().int().min(0) });
 
 /** Base ref to diff a task against: its project's manifest git.base. */
 function taskBaseRef(deps: ServerDeps, projectId: string): string | undefined {
@@ -630,6 +635,73 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (e.seq > lastSent) {
           send(e);
           lastSent = e.seq;
+        }
+      }
+      buffered.length = 0;
+      socket.send(JSON.stringify({ type: 'stream.caughtup', lastSeq: lastSent }));
+
+      socket.on('close', unsub);
+      socket.on('error', unsub);
+    },
+  );
+
+  // --- Notifications (S3-05) --------------------------------------------------
+
+  // Recent notifications + unread count (for the inbox). Self-contained: derived by the
+  // daemon from task/build/upload outcomes; no external push service.
+  app.get('/notifications', auth, async () => ({
+    notifications: deps.notifications.recent(),
+    unread: deps.notifications.unreadCount(),
+  }));
+
+  // Mark everything up to a seq as read.
+  app.post('/notifications/read', auth, async (req, reply) => {
+    const parsed = MarkReadBody.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid body' });
+    deps.notifications.markReadUpTo(parsed.data.upTo);
+    return { ok: true, unread: deps.notifications.unreadCount() };
+  });
+
+  // Live notifications with replay: replay everything after `since`, then tail live. A phone
+  // that was off the tailnet catches up on reconnect by passing its last seen seq.
+  app.get<{ Querystring: { since?: string } }>(
+    '/notifications/stream',
+    { websocket: true, preHandler: requireAuth(deps.db) },
+    (socket, req) => {
+      const q = EventsQuery.safeParse(req.query);
+      const since = q.success ? q.data.since : 0;
+
+      let lastSent = since;
+      let live = false;
+      const buffered: NotificationRow[] = [];
+      const send = (n: NotificationRow): void => {
+        try {
+          socket.send(JSON.stringify(n));
+        } catch {
+          /* socket closed mid-send */
+        }
+      };
+
+      const unsub = deps.notifications.onEvent((n) => {
+        if (!live) {
+          buffered.push(n);
+          return;
+        }
+        if (n.seq > lastSent) {
+          send(n);
+          lastSent = n.seq;
+        }
+      });
+
+      for (const n of deps.notifications.since(since)) {
+        send(n);
+        lastSent = n.seq;
+      }
+      live = true;
+      for (const n of buffered) {
+        if (n.seq > lastSent) {
+          send(n);
+          lastSent = n.seq;
         }
       }
       buffered.length = 0;
