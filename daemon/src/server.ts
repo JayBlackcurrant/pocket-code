@@ -100,6 +100,10 @@ const UploadBuildBody = z.object({
   groups: z.array(z.string().min(1).max(200)).max(50).optional(),
 });
 
+const BuildTailQuery = z.object({
+  tail: z.coerce.number().int().min(0).max(500).default(20),
+});
+
 /** Base ref to diff a task against: its project's manifest git.base. */
 function taskBaseRef(deps: ServerDeps, projectId: string): string | undefined {
   return deps.registry.get(projectId)?.manifest.git.base;
@@ -505,11 +509,34 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     return { builds: deps.builds.listForProject(req.params.id) };
   });
 
-  // One build's status.
-  app.get<{ Params: { id: string } }>('/builds/:id', auth, async (req, reply) => {
-    const build = deps.builds.get(req.params.id);
-    if (!build) return reply.code(404).send({ error: 'unknown build' });
-    return build;
+  // One build's status, plus the tail of its log so a failed build can show the reason
+  // (build.error / upload_error on the row) alongside its last lines (S3-04). `tail=0`
+  // omits the lines.
+  app.get<{ Params: { id: string }; Querystring: { tail?: string } }>(
+    '/builds/:id',
+    auth,
+    async (req, reply) => {
+      const build = deps.builds.get(req.params.id);
+      if (!build) return reply.code(404).send({ error: 'unknown build' });
+      const t = BuildTailQuery.safeParse(req.query);
+      const tail = t.success ? t.data.tail : 20;
+      const lastLog = tail > 0 ? deps.builds.lastLogLines(req.params.id, tail) : [];
+      return { ...build, lastLog };
+    },
+  );
+
+  // Retry a finished build: queue a new build with the same settings (S3-04).
+  app.post<{ Params: { id: string } }>('/builds/:id/retry', auth, async (req, reply) => {
+    if (!deps.builds.get(req.params.id)) return reply.code(404).send({ error: 'unknown build' });
+    try {
+      const build = deps.builds.retry(req.params.id);
+      return reply.code(201).send(build);
+    } catch (err) {
+      if (err instanceof GuardrailError || err instanceof BuildError) {
+        return reply.code(409).send({ error: err.message });
+      }
+      throw err;
+    }
   });
 
   // Replay a build's log (catch-up read; the WebSocket below tails it live).

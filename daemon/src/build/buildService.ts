@@ -63,6 +63,8 @@ export interface EnqueueBuildInput {
   flavor?: string;
   /** Run the manifest codegen steps before the APK build. Default true. */
   runCodegen?: boolean;
+  /** Set when this build is a retry of another (S3-04); recorded for lineage. */
+  retryOf?: string;
 }
 
 function genBuildId(): string {
@@ -168,6 +170,31 @@ export class BuildService {
     return this.buildLog.since(buildId, since);
   }
 
+  /** The tail of a build's log (for showing a failed build's last lines, S3-04). */
+  lastLogLines(buildId: string, limit = 20): StoredBuildEvent[] {
+    return this.buildLog.lastLines(buildId, limit);
+  }
+
+  /**
+   * Retry a finished build (S3-04): queue a NEW build with the same project/task/flavor/
+   * codegen choice, preserving history and lineage (`retryOf`). Throws BuildError if the
+   * build is unknown or still queued/running.
+   */
+  retry(buildId: string): BuildRow {
+    const prev = this.builds.get(buildId);
+    if (!prev) throw new BuildError(`unknown build: "${buildId}"`);
+    if (prev.status === 'queued' || prev.status === 'running') {
+      throw new BuildError(`build "${buildId}" is still ${prev.status}`);
+    }
+    return this.enqueue({
+      projectId: prev.projectId,
+      ...(prev.taskId !== null ? { taskId: prev.taskId } : {}),
+      ...(prev.flavor !== null ? { flavor: prev.flavor } : {}),
+      runCodegen: prev.runCodegen,
+      retryOf: buildId,
+    });
+  }
+
   private persist(buildId: string, type: string, payload: unknown): void {
     this.buildLog.append(buildId, type, payload);
   }
@@ -199,6 +226,7 @@ export class BuildService {
     // the build row is ever created.
     const flavor = resolveBuildFlavor(manifest, input.flavor);
 
+    const runCodegen = input.runCodegen ?? true;
     const id = genBuildId();
     const row = this.builds.create({
       id,
@@ -206,13 +234,16 @@ export class BuildService {
       taskId: input.taskId ?? null,
       flavor,
       cwd,
+      runCodegen,
+      retryOf: input.retryOf ?? null,
     });
     this.persist(id, 'build.created', {
       projectId: manifest.id,
       taskId: input.taskId ?? null,
       flavor,
       cwd,
-      runCodegen: input.runCodegen ?? true,
+      runCodegen,
+      retryOf: input.retryOf ?? null,
     });
 
     const settled = new Promise<void>((res) => this.settlers.set(id, res));
@@ -222,7 +253,7 @@ export class BuildService {
       manifest,
       cwd,
       flavor,
-      runCodegen: input.runCodegen ?? true,
+      runCodegen,
       mainRepoPath: project.resolvedPath,
     });
     void this.drain();
@@ -348,7 +379,11 @@ export class BuildService {
         return;
       }
       if (result.code !== 0) {
-        this.failBuild(buildId, `build step ${i + 1}/${steps.length} exited with code ${result.code}`, result.code);
+        this.failBuild(
+          buildId,
+          `step ${i + 1}/${steps.length} "${command}" exited with code ${result.code}`,
+          result.code,
+        );
         return;
       }
     }

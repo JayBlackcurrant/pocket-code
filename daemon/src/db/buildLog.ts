@@ -49,6 +49,33 @@ export class BuildLog {
     return stored;
   }
 
+  /** The last `limit` log lines for a build (build.log + build.upload_log), oldest-first.
+   *  Used to show the tail of a failed build without replaying the whole log (S3-04). */
+  lastLines(buildId: string, limit = 20): StoredBuildEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT seq, build_id, type, payload, created_at FROM build_events
+         WHERE build_id = ? AND type IN ('build.log', 'build.upload_log')
+         ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(buildId, limit) as Array<{
+      seq: number;
+      build_id: string;
+      type: string;
+      payload: string;
+      created_at: number;
+    }>;
+    return rows
+      .map((r) => ({
+        seq: r.seq,
+        buildId: r.build_id,
+        type: r.type,
+        payload: JSON.parse(r.payload) as unknown,
+        createdAt: r.created_at,
+      }))
+      .reverse();
+  }
+
   /** All events for a build after `sinceSeq` (0 = from the start), in order. */
   since(buildId: string, sinceSeq: number): StoredBuildEvent[] {
     const rows = this.sinceStmt.all(buildId, sinceSeq) as Array<{

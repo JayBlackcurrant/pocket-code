@@ -9,6 +9,8 @@ export interface BuildRow {
   taskId: string | null;
   flavor: string | null;
   cwd: string;
+  runCodegen: boolean;
+  retryOf: string | null;
   artifact: string | null;
   status: BuildStatus;
   exitCode: number | null;
@@ -28,6 +30,8 @@ interface RawBuildRow {
   task_id: string | null;
   flavor: string | null;
   cwd: string;
+  run_codegen: number;
+  retry_of: string | null;
   artifact: string | null;
   status: BuildStatus;
   exit_code: number | null;
@@ -48,6 +52,8 @@ function toBuild(r: RawBuildRow): BuildRow {
     taskId: r.task_id,
     flavor: r.flavor,
     cwd: r.cwd,
+    runCodegen: r.run_codegen === 1,
+    retryOf: r.retry_of,
     artifact: r.artifact,
     status: r.status,
     exitCode: r.exit_code,
@@ -72,12 +78,14 @@ export class BuildStore {
     taskId?: string | null;
     flavor?: string | null;
     cwd: string;
+    runCodegen?: boolean;
+    retryOf?: string | null;
     status?: BuildStatus;
   }): BuildRow {
     const now = Date.now();
     this.db
       .prepare(
-        'INSERT INTO builds (id, project_id, task_id, flavor, cwd, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO builds (id, project_id, task_id, flavor, cwd, run_codegen, retry_of, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         input.id,
@@ -85,6 +93,8 @@ export class BuildStore {
         input.taskId ?? null,
         input.flavor ?? null,
         input.cwd,
+        input.runCodegen === false ? 0 : 1,
+        input.retryOf ?? null,
         input.status ?? 'queued',
         now,
         now,

@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — S3-01 build + S3-02 upload + S3-03 release notes built on the dev machine (serial build queue + live log stream + distribute step + AI release notes); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
+**Last updated:** 2026-10-10 — S3-01 build + S3-02 upload + S3-03 notes + S3-04 states/retry built on the dev machine (serial build queue + live log stream + distribute + AI notes + failure tail/retry); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
 
 ---
 
@@ -18,7 +18,7 @@
 |------|-------|
 | Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
-| Daemon Sprint 3 (S3-01 build + S3-02 upload + S3-03 notes) | 🟡 **built on dev machine** (typecheck clean, 134 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised |
+| Daemon Sprint 3 (S3-01/02/03/04) | 🟡 **built on dev machine** (typecheck clean, 138 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised |
 | Firebase App Distribution (hedged staging) | ⬜ **not provisioned** — manifest `appId`/`groups` are still `<placeholders>`; upload refuses until a real staging app id + tester group + service-account creds exist |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
@@ -70,6 +70,23 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S3-04 build states + failure handling + retry — built on the dev machine
+- **Failed build now shows reason + last log lines.** `GET /builds/:id?tail=N` (default 20,
+  `0` to omit) returns the build row **plus `lastLog`** — the tail of the log
+  (`build.log`/`build.upload_log`) via new `BuildLog.lastLines`. The failure reason is on the
+  row (`error`/`uploadError`); step failures now name the **failing command + exit code**.
+- **Retry:** `POST /builds/:id/retry` queues a **new** build (new id) with the same
+  project/task/flavor/codegen choice and records lineage (`retryOf`). Refused (409) while the
+  original is still queued/running; the flavor guardrail is re-checked on the retry. History
+  is preserved (retries are new rows, never mutate the old one).
+- DB: `builds` gained `run_codegen` (so a retry faithfully repeats the codegen choice) and
+  `retry_of` (+ idempotent `ADD COLUMN` migrations). `BuildRow` carries `runCodegen`/`retryOf`.
+- **Tested:** typecheck clean, **138/138** (4 new: failure reason includes the command, log
+  tail via `lastLogLines`, retry → new build w/ same settings + lineage, retry refused while
+  running). **Not exercised:** a real failing/retried `flutter build` on the Mac.
+- **➡️ Action on this Mac:** `git pull` + restart (serves `?tail=` on `GET /builds/:id` and
+  the retry endpoint; the `run_codegen`/`retry_of` columns migrate in automatically).
 
 ### 2026-10-10 — S3-03 release-notes generation — built on the dev machine
 - New `ReleaseNotesService` (`src/build/releaseNotes.ts`): generates **≤8 tester-facing

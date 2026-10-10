@@ -224,6 +224,57 @@ describe('BuildService', () => {
     expect(commands).toHaveLength(3);
   });
 
+  it('includes the failing command in the failure reason', async () => {
+    const runStep: RunStep = async ({ command }) => ({ code: command.includes('pub get') ? 3 : 0 });
+    const svc = mkService(mkRegistry(manifest(repo)), runStep);
+    const build = svc.enqueue({ projectId: 'hedged' });
+    await svc.whenSettled(build.id);
+    expect(svc.get(build.id)?.error).toContain('fvm flutter pub get');
+  });
+
+  it('exposes the tail of the log via lastLogLines', async () => {
+    const runStep: RunStep = async ({ onLine }) => {
+      onLine('stdout', 'line A');
+      onLine('stdout', 'line B');
+      onLine('stderr', 'line C');
+      return { code: 0 };
+    };
+    const svc = mkService(mkRegistry(manifest(repo)), runStep);
+    const build = svc.enqueue({ projectId: 'hedged', runCodegen: false });
+    await svc.whenSettled(build.id);
+
+    const tail = svc.lastLogLines(build.id, 2);
+    expect(tail).toHaveLength(2);
+    const lines = tail.map((e) => (e.payload as { line: string }).line);
+    expect(lines).toEqual(['line B', 'line C']);
+  });
+
+  it('retries a finished build as a new build with the same settings + lineage', async () => {
+    const runStep: RunStep = async () => ({ code: 0 });
+    const svc = mkService(mkRegistry(manifest(repo)), runStep);
+    const first = svc.enqueue({ projectId: 'hedged', runCodegen: false });
+    await svc.whenSettled(first.id);
+    expect(svc.get(first.id)?.status).toBe('succeeded');
+
+    const retry = svc.retry(first.id);
+    expect(retry.id).not.toBe(first.id);
+    expect(retry.retryOf).toBe(first.id);
+    expect(retry.runCodegen).toBe(false);
+    expect(retry.flavor).toBe('staging');
+    await svc.whenSettled(retry.id);
+    expect(svc.get(retry.id)?.status).toBe('succeeded');
+  });
+
+  it('refuses to retry a build that is still running', async () => {
+    const gate = new Promise<void>(() => {}); // never resolves
+    const runStep: RunStep = () => gate.then(() => ({ code: 0 }));
+    const svc = mkService(mkRegistry(manifest(repo)), runStep);
+    const build = svc.enqueue({ projectId: 'hedged' });
+    await sleep(10);
+    expect(svc.get(build.id)?.status).toBe('running');
+    expect(() => svc.retry(build.id)).toThrow(/running/);
+  });
+
   it('replays build events in seq order via logsSince', async () => {
     const events: StoredBuildEvent[] = [];
     const runStep: RunStep = async ({ onLine }) => {

@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS builds (
   task_id     TEXT,                       -- optional: build a task's worktree
   flavor      TEXT,
   cwd         TEXT NOT NULL,              -- directory the build ran in
+  run_codegen INTEGER NOT NULL DEFAULT 1, -- 1 = ran manifest codegen before the APK build
+  retry_of    TEXT,                       -- build id this is a retry of (S3-04), if any
   artifact    TEXT,                       -- produced APK path (best-effort)
   status      TEXT NOT NULL,              -- queued | running | succeeded | failed | cancelled
   exit_code   INTEGER,                    -- failing step's exit code
@@ -125,9 +127,11 @@ export function openDb(dbPath: string): Db {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
-  // Migrations for DBs created before a column existed (S3-02 upload fields).
+  // Migrations for DBs created before a column existed (S3-02 upload fields, S3-04 fields).
   addColumnIfMissing(db, 'builds', 'upload_status', 'TEXT');
   addColumnIfMissing(db, 'builds', 'release_url', 'TEXT');
   addColumnIfMissing(db, 'builds', 'upload_error', 'TEXT');
+  addColumnIfMissing(db, 'builds', 'run_codegen', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing(db, 'builds', 'retry_of', 'TEXT');
   return db;
 }
