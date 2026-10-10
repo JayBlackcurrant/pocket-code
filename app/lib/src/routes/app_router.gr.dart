@@ -11,6 +11,56 @@
 part of 'app_router.dart';
 
 /// generated route for
+/// [DiffFilePage]
+class DiffFileRoute extends PageRouteInfo<DiffFileRouteArgs> {
+  DiffFileRoute({
+    required String taskId,
+    required String path,
+    Key? key,
+    List<PageRouteInfo>? children,
+  }) : super(
+          DiffFileRoute.name,
+          args: DiffFileRouteArgs(taskId: taskId, path: path, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'DiffFileRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<DiffFileRouteArgs>();
+      return DiffFilePage(taskId: args.taskId, path: args.path, key: args.key);
+    },
+  );
+}
+
+class DiffFileRouteArgs {
+  const DiffFileRouteArgs({required this.taskId, required this.path, this.key});
+
+  final String taskId;
+
+  final String path;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'DiffFileRouteArgs{taskId: $taskId, path: $path, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! DiffFileRouteArgs) return false;
+    return taskId == other.taskId && path == other.path && key == other.key;
+  }
+
+  @override
+  int get hashCode => taskId.hashCode ^ path.hashCode ^ key.hashCode;
+}
+
+/// generated route for
 /// [HomePage]
 class HomeRoute extends PageRouteInfo<void> {
   const HomeRoute({List<PageRouteInfo>? children})
@@ -104,6 +154,50 @@ class PairingRoute extends PageRouteInfo<void> {
       return const PairingPage();
     },
   );
+}
+
+/// generated route for
+/// [ReviewPage]
+class ReviewRoute extends PageRouteInfo<ReviewRouteArgs> {
+  ReviewRoute({required String taskId, Key? key, List<PageRouteInfo>? children})
+      : super(
+          ReviewRoute.name,
+          args: ReviewRouteArgs(taskId: taskId, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'ReviewRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<ReviewRouteArgs>();
+      return ReviewPage(taskId: args.taskId, key: args.key);
+    },
+  );
+}
+
+class ReviewRouteArgs {
+  const ReviewRouteArgs({required this.taskId, this.key});
+
+  final String taskId;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'ReviewRouteArgs{taskId: $taskId, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! ReviewRouteArgs) return false;
+    return taskId == other.taskId && key == other.key;
+  }
+
+  @override
+  int get hashCode => taskId.hashCode ^ key.hashCode;
 }
 
 /// generated route for

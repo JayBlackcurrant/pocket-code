@@ -21,7 +21,8 @@
 | Project list / new task (S1-09) | ✅ implemented — tap active project → prompt → `POST /projects/:id/tasks` |
 | Task stream screen (S1-10) | ✅ implemented — `WS …/stream?since=<seq>`, replay + reconnect, tool-call cards, Stop button |
 | Approvals UI (S2-04) | ✅ done — approval cards (Allow once / Always / Deny+reason) in the task stream |
-| Diff review + code viewer (S2-07, S2-08) | ⬜ not started |
+| Diff review (S2-07) | ✅ done — file list (+/- counts, generated collapsed) → per-file unified diff |
+| Code viewer (S2-08) | ⬜ not started |
 | Builds screen + biometric gate (S3-06, S3-07) | ⬜ not started |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
@@ -37,7 +38,7 @@
 - [x] **S1-09** Project list + "new task" screen
 - [x] **S1-10** Task stream screen (text + tool-call cards, stop button; reconnect replays via `since=<seq>`)
 - [x] **S2-04** Approval cards (Allow once / Always / Deny with reason)
-- [ ] **S2-07** Review screen (file list, +/- counts, unified/stacked diff; smooth on large diffs)
+- [x] **S2-07** Review screen (file list, +/- counts, unified diff; smooth on large diffs)
 - [ ] **S2-08** Code viewer with syntax highlighting (chunked for large files)
 - [ ] **S3-06** Builds screen (group picker, notes editor, progress, Firebase link)
 - [ ] **S3-07** Biometric gate (`local_auth`) for push / build / "always allow"
@@ -75,6 +76,18 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S2-07 diff review screen
+- New `src/review/` feature consuming S2-05 endpoints. `ReviewPage` (route
+  `/tasks/:taskId/review`): file list from `GET /tasks/:id/diff/summary` with status badge +
+  `+adds/-dels`; **generated files collapsed** by default (`.g.dart`/`.gr.dart`/`.freezed.dart`/
+  `pubspec.lock`) under an ExpansionTile. Tap → `DiffFilePage` (`/tasks/:taskId/review/file`):
+  per-file unified patch from `GET /tasks/:id/diff?path=`, rendered with a pure
+  `classifyDiffLine` colorizer, **virtualized via `ListView.builder`** (smooth on large diffs),
+  with binary + truncated handling. Entry point: a Review action on the task screen app bar.
+- Custom renderer (no `flutter_diff_viewer` dep). Providers `diffSummary`/`fileDiff` (codegen).
+- **Tested:** `analyze` clean, `flutter test` 16/16 (classifier + isGenerated). Smooth-scroll
+  relies on ListView.builder; not yet profiled on a real device with a huge diff.
 
 ### 2026-10-10 — S2-04 approval cards
 - Approval cards render in the task stream for parked tool calls, derived from the WS event

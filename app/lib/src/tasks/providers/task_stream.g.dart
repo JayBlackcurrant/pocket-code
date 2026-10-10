@@ -66,7 +66,7 @@ final class TaskStreamProvider
   }
 }
 
-String _$taskStreamHash() => r'2ae3ad0bcac9b9c01a7aa22fb8f7f79cf3a434d5';
+String _$taskStreamHash() => r'3b73eb945f68654d3caea2824c3f54a2691755b5';
 
 /// Connects to `WS /tasks/:id/stream?since=<seq>`, replays missed events then live-tails,
 /// and reconnects (from the last seen seq) on drop — mirrors the daemon's replay

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../../routes/app_router.dart';
 import '../models/pending_approval.dart';
 import '../models/task_stream_state.dart';
 import '../providers/task_stream.dart';
@@ -52,7 +53,15 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Task'),
-        actions: [_StatusChip(status: state.status)],
+        actions: [
+          IconButton(
+            tooltip: 'Review changes',
+            icon: const Icon(Icons.rate_review_outlined),
+            onPressed: () =>
+                context.router.push(ReviewRoute(taskId: widget.taskId)),
+          ),
+          _StatusChip(status: state.status),
+        ],
       ),
       body: Column(
         children: [
