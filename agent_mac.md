@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — Sprint 3 daemon complete: S3-01/02/03/04/05/08 (build queue + live log + distribute + AI notes + failure tail/retry + caffeinate + self-contained notifications); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
+**Last updated:** 2026-10-10 — Firebase App Distribution replaced with a keyless **Tailscale-served APK link** (branch `claude/tailscale-distribution`, 161 tests); earlier: Sprint 3 daemon complete; Sprint 2 reviewed; agent SDK 0.1.77→0.3.296 (zod 3→4)
 
 ---
 
@@ -20,7 +20,7 @@
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
 | Daemon Sprint 3 (S3-01/02/03/04/05/08) | 🟡 **built on dev machine** (typecheck clean, 150 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised. **Sprint 3 daemon complete.** |
 | Notifications (S3-05) | ✅ self-contained — daemon derives notifications from task/build events; phone reads over tailnet (live + replay). ⚠️ no off-tailnet push (needs an external relay; see log) |
-| Firebase App Distribution (hedged staging) | ⬜ **not provisioned** — manifest `appId`/`groups` are still `<placeholders>`; upload refuses until a real staging app id + tester group + service-account creds exist |
+| Distribution method | ✅ **Tailscale-served APK link** (keyless; no Google service account) — branch `claude/tailscale-distribution`, typecheck clean + 161 tests. Daemon serves the APK over its own HTTPS and returns a signed, expiring `/builds/:id/apk?t=…` link. Replaces Firebase (that path kept, still optional). Trade-off: testers must be on the tailnet. |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
@@ -62,6 +62,10 @@ tailscale serve status
 
 - [x] Daemon SDK upgrade + zod 4 + runner logging — **committed by the user as `3e0a721` on `main` and pushed** (dev side can pull). *(Landed directly on `main`, not a `claude/` branch.)*
 - [ ] **Re-verify a live agent task** from the phone now that the SDK is upgraded (the earlier 400 should be gone).
+- [ ] **Merge/push `claude/tailscale-distribution`** (Tailscale-served distribution) — committed locally here (`8e856ec`), not pushed. Then `git pull` + restart so the daemon serves download links.
+- [ ] **App (dev side):** relabel 3 "Firebase" strings — `app/lib/src/builds/ui/builds_page.dart:474,477` ("Copy Firebase link" / console fallback) and `app/lib/src/builds/build_feed.dart:85` ("Uploading to Firebase…"). Cosmetic; the link already works.
+- [ ] Optional: set `RELAYD_DOWNLOAD_SECRET` in `env.sh` so download links stay valid across daemon restarts (else a fresh per-process secret invalidates old links on restart).
+- [ ] Full end-to-end (build→ship→install) still needs **Flutter/FVM on this Mac** to produce a real staging APK (not yet installed).
 - [ ] **S4-01** — LaunchAgent plist with `KeepAlive` for real reboot/crash survival (deferred; user chose "leave as-is for now" on 2026-10-09). Keeps biting pairing: when the daemon is stopped/rebooted nothing restarts it.
 - [ ] Confirm task worktrees land somewhere sensible (`RELAYD_WORKSPACES_DIR` is unset; verify a real task run creates a worktree inside the allowlist).
 - [ ] **S4-05 hardening:** `permissionRules` `git push` deny regex misses `git -C <path> push` — tighten it.
@@ -72,7 +76,25 @@ tailscale serve status
 
 ## Log
 
-### 2026-10-10 — S3-05 notifications (self-contained, no external push) — built on the dev machine
+### 2026-10-10 — replaced Firebase App Distribution with a keyless Tailscale-served link (this Mac)
+User had no Firebase service-account key and wanted a keyless replacement with minimal change.
+Planned (plan mode) and implemented on branch `claude/tailscale-distribution` (`8e856ec`):
+- **Why keyless works here:** the daemon already holds the built APK (`build.artifact`) and is
+  already on Tailscale HTTPS; the app already renders whatever `releaseUrl` arrives on the
+  `build.upload_completed` event. So: serve the APK ourselves and hand back a link.
+- **Added** `distribution.tailscaleServe { linkTtlMinutes }` to the manifest (additive; Firebase
+  path kept, still optional). `distributionService` branches to a keyless path that skips the
+  credential/Firebase/placeholder checks and builds a **signed, expiring** URL
+  `${advertiseUrl}/builds/:id/apk?t=…`. New `downloadToken.ts` (HMAC via `auth/crypto`). New route
+  `GET /builds/:id/apk` — **not bearer-authed** (a tester opens it in a browser), gated by the
+  token; tailnet-only via `tailscale serve`. `RELAYD_DOWNLOAD_SECRET` optional (random if unset).
+  `hedged.yaml` switched to `tailscaleServe`.
+- **Tested:** typecheck clean; **161 tests** incl. new downloadToken unit tests, the tailscaleServe
+  path (no credential needed, link verifies, nothing spawned), and the `/builds/:id/apk` route
+  (200 valid / 403 bad-or-expired / 404 missing). Booted the daemon on the branch → `hedged` still
+  `active`, `/healthz` ok (manifest schema change parses).
+- **Not done / follow-ups:** branch not pushed; 3 cosmetic app "Firebase" strings (dev side);
+  real build→install needs Flutter/FVM here. Trade-off vs Firebase: testers must be on the tailnet.
 - **Decision (user):** "use the service which starts with the daemon and ends with it, no
   extra" → notifications are **daemon-only**, no Firebase/FCM/ntfy/Gotify, no app, no account.
   (No Firebase project was created — I can't, and it wasn't wanted for notifications. The
