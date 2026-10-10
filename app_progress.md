@@ -76,6 +76,20 @@
 
 ## Log
 
+### 2026-10-10 — logging interceptor + app-scoped launch config
+- Added a colorized Dio **logging interceptor** mirroring hedged: `core/extension/log.dart`
+  (`logInfo/logSuccess/logWarning/logError`) + `core/interceptors/logging_interceptor.dart`
+  (request/response/error blocks). Wired into `dio_instance.dart`, **debug builds only**,
+  after the auth interceptor; replaced dio's built-in `LogInterceptor`.
+  - Deviations from reference: dropped hedged's `await Future.delayed(20ms)` per hook (needless
+    latency); used `extends Interceptor` (consistent with `AuthInterceptor`) vs hedged's
+    `implements InterceptorsWrapper`.
+- Added `app/.vscode/launch.json` (PocketCode debug/profile/release, rooted at `app/`) and
+  `app/.vscode/settings.json` (FVM SDK path) so `/app` can be opened/run standalone. The
+  repo-root `.vscode/launch.json` (daemon + app + compound) still covers the whole monorepo.
+- **Tested:** `dart format` + `flutter analyze` clean. (No codegen needed.) Logs only show in
+  debug runs (`flutter run`), not `--release`.
+
 ### 2026-10-10 — app side taken over; corrected status; Sprint 1 app complete
 - Took over `app_progress.md` from the Mac-seeded version and corrected it against `/app/lib`.
 - **Built S1-08…S1-10** (this spans earlier sessions): pairing (QR + manual paste), project

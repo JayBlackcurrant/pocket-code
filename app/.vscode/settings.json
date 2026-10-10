@@ -1,0 +1,10 @@
+{
+  "// dart.flutterSdkPath": "Use the FVM-pinned Flutter (3.38.3) when this folder is opened directly.",
+  "dart.flutterSdkPath": ".fvm/flutter_sdk",
+  "dart.lineLength": 80,
+  "search.exclude": {
+    "**/.dart_tool": true,
+    "**/.fvm/versions": true,
+    "**/build": true
+  }
+}
