@@ -18,6 +18,23 @@ import type { Db } from '../db/db.js';
 import { PermissionBroker, type Decision, type PendingPermission } from './permissionBroker.js';
 import { evaluatePermission } from './permissionRules.js';
 import { defaultSandbox } from './sandbox.js';
+import { safeResolveWithin } from '../fs/pathSafety.js';
+
+/** Thrown when a task is requested while the project's checkout is already busy with one. */
+export class ProjectBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProjectBusyError';
+  }
+}
+
+/** Tools that write a file, and the input field holding the path to contain to the project dir. */
+const EDIT_PATH_FIELDS: Record<string, string> = {
+  Edit: 'file_path',
+  Write: 'file_path',
+  MultiEdit: 'file_path',
+  NotebookEdit: 'notebook_path',
+};
 
 /** Minimal structured logger; a pino logger (fastify's `app.log`) satisfies it. */
 export interface RunnerLogger {
@@ -92,8 +109,8 @@ function eventType(msg: SDKMessage): string {
 }
 
 /**
- * Runs a Claude Code task (S1-05): creates a worktree, runs the Agent SDK `query()`
- * with `cwd` set to that worktree, and writes every message to the event log with a
+ * Runs a Claude Code task (S1-05): creates a `claude/<slug>` branch in the project checkout,
+ * runs the Agent SDK `query()` with `cwd` set to that checkout, and writes every message to the event log with a
  * `seq` (event-log-first). On completion it stores the session id and cost on the task,
  * so a run can later be resumed (S4-02) and its cost shown in the app.
  */
@@ -111,6 +128,8 @@ export class AgentRunner {
   private readonly running = new Map<string, { query: Query; abort: AbortController }>();
   private readonly settled = new Map<string, Promise<void>>();
   private readonly broker: PermissionBroker;
+  /** Projects with a task currently owning the checkout (running or waiting). One at a time. */
+  private readonly activeProjects = new Set<string>();
 
   constructor(deps: AgentRunnerDeps) {
     this.registry = deps.registry;
@@ -170,8 +189,10 @@ export class AgentRunner {
   }
 
   /**
-   * Create the worktree and begin the run. Returns once the worktree exists; the agent
-   * loop continues in the background (awaitable via whenSettled).
+   * Start a task in the project checkout on a fresh `claude/<slug>` branch, and begin the run.
+   * Only one task may own a project's checkout at a time (we no longer isolate via worktrees), so
+   * a second start while one is active throws ProjectBusyError. Returns once the branch exists;
+   * the agent loop continues in the background (awaitable via whenSettled).
    */
   async start(input: StartTaskInput): Promise<StartedTask> {
     const project = this.registry.getActive(input.projectId);
@@ -179,21 +200,30 @@ export class AgentRunner {
       throw new Error(`project not active: "${input.projectId}"`);
     }
     const manifest = project.manifest;
-    const taskId = input.taskId ?? genTaskId();
 
+    // Single-owner gate: only one task may hold a project's checkout (running or waiting).
+    if (this.activeProjects.has(manifest.id)) {
+      throw new ProjectBusyError(
+        `project "${manifest.id}" already has an active task; finish or discard it first`,
+      );
+    }
+    this.activeProjects.add(manifest.id);
+
+    const taskId = input.taskId ?? genTaskId();
     // Create the task row first so events have a valid foreign key.
     this.tasks.create({ id: taskId, projectId: manifest.id, branch: '', worktree: '', status: 'queued' });
     this.persist(taskId, 'task.created', { projectId: manifest.id, prompt: input.prompt });
 
     let worktree;
     try {
-      worktree = await this.git.createWorktree(project.resolvedPath, {
+      worktree = await this.git.createTaskBranch(project.resolvedPath, {
         taskId,
         baseRef: manifest.git.base,
         name: input.prompt,
       });
     } catch (err) {
-      this.fail(taskId, 'worktree', err);
+      this.activeProjects.delete(manifest.id);
+      this.fail(taskId, 'branch', err);
       throw err;
     }
 
@@ -212,6 +242,7 @@ export class AgentRunner {
     const run = this.runAgent(taskId, worktree.path, input).finally(() => {
       this.running.delete(taskId);
       this.broker.clearTask(taskId);
+      this.activeProjects.delete(manifest.id);
     });
     this.settled.set(taskId, run);
     run.catch(() => {
@@ -230,6 +261,25 @@ export class AgentRunner {
       // Permission rules (S2-02) run first: dangerous tools are denied and never run,
       // safe ones are auto-allowed; everything else parks for the phone (S2-01).
       canUseTool: (toolName, toolInput, opts): Promise<PermissionResult> => {
+        // Edit containment: tasks run in the real project checkout now (no worktree sandbox),
+        // so refuse any write whose target path escapes the project dir (cwd).
+        const pathField = EDIT_PATH_FIELDS[toolName];
+        if (pathField !== undefined) {
+          const target = toolInput[pathField];
+          if (typeof target === 'string') {
+            try {
+              safeResolveWithin(cwd, target);
+            } catch {
+              const reason = `edit path is outside the project directory: "${target}"`;
+              this.persist(taskId, 'agent.permission_auto_denied', {
+                toolUseId: opts.toolUseID,
+                toolName,
+                reason,
+              });
+              return Promise.resolve({ behavior: 'deny', message: reason });
+            }
+          }
+        }
         const rule = evaluatePermission(toolName, toolInput);
         if (rule.decision === 'deny') {
           this.persist(taskId, 'agent.permission_auto_denied', {

@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { GitError, GitService, runGit, slugify } from './gitService.js';
 
 let repo: string;
@@ -40,59 +40,79 @@ describe('slugify', () => {
   });
 });
 
+async function currentBranch(cwd: string): Promise<string> {
+  return (await runGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+}
+
 describe('GitService', () => {
-  it('creates a worktree on claude/<slug> branched from base', async () => {
-    const wt = await svc.createWorktree(repo, { taskId: 't1', name: 'Fix Login', baseRef: 'stag' });
-    expect(wt.branch).toBe('claude/fix-login');
-    expect(wt.baseRef).toBe('stag');
-    expect(existsSync(wt.path)).toBe(true);
-    expect(existsSync(join(wt.path, 'README.md'))).toBe(true); // base content present
-    const list = await svc.listWorktrees(repo);
-    expect(list.some((w) => w.branch === 'claude/fix-login')).toBe(true);
+  // Tasks now run in place on the shared checkout, so reset it to a clean `stag` between tests.
+  afterEach(async () => {
+    try {
+      await runGit(repo, ['checkout', '-f', 'stag']);
+      await runGit(repo, ['clean', '-fd']);
+      const out = await runGit(repo, ['branch', '--format=%(refname:short)']);
+      for (const name of out.split('\n').map((s) => s.trim())) {
+        if (name.startsWith('claude/')) await runGit(repo, ['branch', '-D', name]).catch(() => undefined);
+      }
+    } catch {
+      /* best-effort cleanup */
+    }
   });
 
-  it('does not collide for parallel tasks with the same name', async () => {
-    const [a, b] = await Promise.all([
-      svc.createWorktree(repo, { taskId: 'p1', name: 'same', baseRef: 'stag' }),
-      svc.createWorktree(repo, { taskId: 'p2', name: 'same', baseRef: 'stag' }),
-    ]);
-    expect(a.path).not.toBe(b.path);
-    expect(a.branch).not.toBe(b.branch);
-    expect(new Set([a.branch, b.branch]).size).toBe(2);
-    expect([a.branch, b.branch].every((x) => x.startsWith('claude/same'))).toBe(true);
+  it('creates claude/<slug> in place, branched from base', async () => {
+    const wt = await svc.createTaskBranch(repo, { taskId: 't1', name: 'Fix Login', baseRef: 'stag' });
+    expect(wt.branch).toBe('claude/fix-login');
+    expect(wt.baseRef).toBe('stag');
+    expect(wt.path).toBe(repo); // in place: the task dir IS the project checkout
+    expect(await currentBranch(repo)).toBe('claude/fix-login'); // checkout switched to it
+    expect(existsSync(join(repo, 'README.md'))).toBe(true); // base content present
+  });
+
+  it('picks a free name when the branch already exists', async () => {
+    const first = await svc.createTaskBranch(repo, { taskId: 'p1', name: 'same', baseRef: 'stag' });
+    expect(first.branch).toBe('claude/same');
+    // Checkout is clean (on claude/same with base content); the same slug again must suffix.
+    const second = await svc.createTaskBranch(repo, { taskId: 'p2', name: 'same', baseRef: 'stag' });
+    expect(second.branch).toBe('claude/same-2');
   });
 
   it('isolates commits to the task branch (base untouched)', async () => {
-    const wt = await svc.createWorktree(repo, { taskId: 'iso', name: 'iso', baseRef: 'stag' });
-    writeFileSync(join(wt.path, 'new.txt'), 'x\n');
-    await runGit(wt.path, ['add', 'new.txt']);
-    await commit(wt.path, 'add new');
-    const baseFiles = await runGit(repo, ['ls-tree', '--name-only', 'stag']);
-    expect(baseFiles).not.toContain('new.txt'); // base branch unaffected
-    const branchFiles = await runGit(repo, ['ls-tree', '--name-only', wt.branch]);
-    expect(branchFiles).toContain('new.txt');
+    const wt = await svc.createTaskBranch(repo, { taskId: 'iso', name: 'iso', baseRef: 'stag' });
+    writeFileSync(join(repo, 'new.txt'), 'x\n');
+    await runGit(repo, ['add', 'new.txt']);
+    await commit(repo, 'add new');
+    expect(await runGit(repo, ['ls-tree', '--name-only', 'stag'])).not.toContain('new.txt');
+    expect(await runGit(repo, ['ls-tree', '--name-only', wt.branch])).toContain('new.txt');
   });
 
-  it('removes a worktree and deletes its branch', async () => {
-    const wt = await svc.createWorktree(repo, { taskId: 'rm', name: 'rm me', baseRef: 'stag' });
-    await svc.removeWorktree(repo, 'rm');
-    expect(existsSync(wt.path)).toBe(false);
-    const list = await svc.listWorktrees(repo);
-    expect(list.some((w) => w.branch === wt.branch)).toBe(false);
+  it('discards a task: drops changes, returns to base, deletes the branch', async () => {
+    const wt = await svc.createTaskBranch(repo, { taskId: 'rm', name: 'rm me', baseRef: 'stag' });
+    writeFileSync(join(repo, 'scratch.txt'), 'dirty\n'); // uncommitted work
+    await svc.discardTaskBranch(repo, wt.branch, 'stag');
+    expect(await currentBranch(repo)).toBe('stag');
+    expect(existsSync(join(repo, 'scratch.txt'))).toBe(false); // dropped
+    expect(await svc.isClean(repo)).toBe(true);
     await expect(
       runGit(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${wt.branch}`]),
     ).rejects.toThrow();
   });
 
+  it('refuses to start a task on a dirty working tree', async () => {
+    writeFileSync(join(repo, 'dirty.txt'), 'x\n');
+    await expect(
+      svc.createTaskBranch(repo, { taskId: 'd1', name: 'd', baseRef: 'stag' }),
+    ).rejects.toThrow(/not clean/);
+  });
+
   it('rejects an unsafe task id', async () => {
     await expect(
-      svc.createWorktree(repo, { taskId: '../evil', baseRef: 'stag' }),
+      svc.createTaskBranch(repo, { taskId: '../evil', baseRef: 'stag' }),
     ).rejects.toThrow(/invalid task id/);
   });
 
   it('throws a clear error for a missing base ref', async () => {
     await expect(
-      svc.createWorktree(repo, { taskId: 'nb', baseRef: 'does-not-exist' }),
+      svc.createTaskBranch(repo, { taskId: 'nb', baseRef: 'does-not-exist' }),
     ).rejects.toThrow(GitError);
   });
 });

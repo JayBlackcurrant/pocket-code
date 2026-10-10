@@ -376,7 +376,7 @@ git:
     expect((stepEvents[1]!.payload as { dir?: string }).dir).toBe('api');
   });
 
-  it('fails the build when a codegen step `dir` escapes the worktree', async () => {
+  it('fails the build when a codegen step `dir` escapes the project directory', async () => {
     const runStep: RunStep = async () => ({ code: 0 });
     const yaml = `
 id: hedged
@@ -400,6 +400,6 @@ git:
     await svc.whenSettled(build.id);
     const row = svc.get(build.id);
     expect(row?.status).toBe('failed');
-    expect(row?.error).toMatch(/escapes the worktree/);
+    expect(row?.error).toMatch(/escapes the project directory/);
   });
 });

@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   });
   // Long jobs run under `caffeinate -i` so the Mac stays awake mid-build (S3-08).
   const runStep = makeSpawnRunStep({ caffeinate: env.caffeinate });
-  const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks, runStep });
+  const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks, runStep, git });
   const distribution = new DistributionService({
     registry,
     builds: buildStore,

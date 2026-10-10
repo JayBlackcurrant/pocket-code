@@ -23,7 +23,7 @@ import {
   NotADirectoryError,
 } from './fs/fileReader.js';
 import type { ProjectRegistry, RegisteredProject } from './registry/projectRegistry.js';
-import type { AgentRunner } from './agent/agentRunner.js';
+import { type AgentRunner, ProjectBusyError } from './agent/agentRunner.js';
 import type { TaskStore } from './db/taskStore.js';
 import type { EventLog, StoredEvent } from './db/eventLog.js';
 import { GitError, type GitService } from './git/gitService.js';
@@ -252,13 +252,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (project.status !== 'active') {
       return reply.code(409).send({ error: `project not active: ${project.reason ?? project.status}` });
     }
-    const started = await deps.runner.start({
-      projectId: req.params.id,
-      prompt: parsed.data.prompt,
-      ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
-      ...(parsed.data.taskId !== undefined ? { taskId: parsed.data.taskId } : {}),
-    });
-    return reply.code(201).send(started);
+    try {
+      const started = await deps.runner.start({
+        projectId: req.params.id,
+        prompt: parsed.data.prompt,
+        ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
+        ...(parsed.data.taskId !== undefined ? { taskId: parsed.data.taskId } : {}),
+      });
+      return reply.code(201).send(started);
+    } catch (err) {
+      // One task owns a project's checkout at a time (no more worktrees).
+      if (err instanceof ProjectBusyError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
   });
 
   app.get<{ Params: { id: string } }>('/tasks/:id', auth, async (req, reply) => {
@@ -447,7 +453,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
   });
 
-  // Discard a task: cancel if running, remove the worktree + branch, mark discarded.
+  // Discard a task: cancel if running, drop its changes + delete its branch, mark discarded.
   app.post<{ Params: { id: string } }>('/tasks/:id/discard', auth, async (req, reply) => {
     const task = deps.tasks.get(req.params.id);
     if (!task) return reply.code(404).send({ error: 'unknown task' });
@@ -455,10 +461,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
     await deps.runner.cancel(task.id);
     try {
-      await deps.git.removeWorktree(project.resolvedPath, task.id);
+      await deps.git.discardTaskBranch(project.resolvedPath, task.branch, project.manifest.git.base);
     } catch (err) {
       if (!(err instanceof GitError)) throw err;
-      // Worktree may already be gone; discard is best-effort.
+      // Best-effort: branch may not exist / already cleaned.
     }
     deps.tasks.setStatus(task.id, 'discarded');
     return { discarded: task.id };

@@ -174,9 +174,9 @@ describe('ReleaseNotesService.generate', () => {
     await expect(svc.generate('nope')).rejects.toThrow(/unknown task/);
   });
 
-  it('throws when the task has no worktree yet', async () => {
+  it('throws when the task has no branch yet', async () => {
     tasks.create({ id: 't1', projectId: 'hedged', branch: '', worktree: '' });
     const svc = new ReleaseNotesService({ registry: registry(), tasks, git: diffStub([]), query: null });
-    await expect(svc.generate('t1')).rejects.toThrow(/no worktree/);
+    await expect(svc.generate('t1')).rejects.toThrow(/no branch/);
   });
 });

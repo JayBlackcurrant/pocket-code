@@ -123,7 +123,7 @@ export class ReleaseNotesService {
   async generate(taskId: string): Promise<ReleaseNotesResult> {
     const task = this.tasks.get(taskId);
     if (!task) throw new ReleaseNotesError(`unknown task: "${taskId}"`);
-    if (!task.worktree) throw new ReleaseNotesError(`task "${taskId}" has no worktree yet`);
+    if (!task.worktree) throw new ReleaseNotesError(`task "${taskId}" has no branch yet`);
     const base = this.registry.get(task.projectId)?.manifest.git.base;
 
     // Preferred: ask the same session that did the work.

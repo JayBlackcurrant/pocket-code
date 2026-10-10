@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { rmSync } from 'node:fs';
+import { relative } from 'node:path';
 import { promisify } from 'node:util';
 import { safeResolveWithin } from '../fs/pathSafety.js';
 
@@ -74,7 +74,7 @@ export interface WorktreeInfo {
   taskId: string;
   slug: string;
   branch: string; // claude/<slug>[-n]
-  path: string; // absolute, canonical worktree path
+  path: string; // the project checkout dir (tasks run in place, not in a worktree)
   baseRef: string; // the ref actually branched from
 }
 
@@ -87,45 +87,29 @@ export interface CreateWorktreeOpts {
   slug?: string;
 }
 
-interface ParsedWorktree {
-  path: string;
-  branch?: string;
-  head?: string;
-}
-
 function isBranchExistsError(err: unknown): boolean {
   return err instanceof GitError && /already (exists|used)/i.test(err.message);
 }
 
 /**
- * Manages one git worktree + branch per task (CLAUDE.md). Worktrees live under
- * `<repo>/.worktrees/<taskId>` on branch `claude/<slug>`. Branch creation is
- * race-safe: `git worktree add -b` fails atomically if the branch exists, so
- * concurrent tasks with the same slug fall back to `claude/<slug>-2`, `-3`, ….
+ * Manages one task branch per project (CLAUDE.md). Tasks run **in place** in the project
+ * checkout on branch `claude/<slug>` — not in a separate worktree — so gitignored local
+ * files (signing keys, local.properties) are present for builds. Only one task may own a
+ * project's checkout at a time (serialized by the caller). Branch-name collisions fall back
+ * to `claude/<slug>-2`, `-3`, ….
  */
 export class GitService {
   constructor(private readonly git: GitRunner = runGit) {}
 
-  private worktreePath(repoPath: string, taskId: string): string {
-    assertTaskId(taskId);
-    return safeResolveWithin(repoPath, join('.worktrees', taskId));
+  /** True when the working tree has no staged, unstaged, or untracked changes. */
+  async isClean(repoPath: string): Promise<boolean> {
+    return (await this.git(repoPath, ['status', '--porcelain'])).trim() === '';
   }
 
-  /** Keep `.worktrees/` out of the main working tree's status without editing the
-   *  committed .gitignore — add it to the repo's local info/exclude. */
-  private async ensureExcluded(repoPath: string): Promise<void> {
-    const gitCommonDir = (await this.git(repoPath, ['rev-parse', '--git-common-dir'])).trim();
-    const base = isAbsolute(gitCommonDir) ? gitCommonDir : join(repoPath, gitCommonDir);
-    const excludePath = join(base, 'info', 'exclude');
-    try {
-      const current = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : '';
-      if (current.split(/\r?\n/).some((l) => l.trim() === '.worktrees/')) return;
-      mkdirSync(dirname(excludePath), { recursive: true });
-      const prefix = current === '' || current.endsWith('\n') ? '' : '\n';
-      appendFileSync(excludePath, `${prefix}.worktrees/\n`);
-    } catch {
-      // Non-fatal: exclusion is a convenience, not a correctness requirement.
-    }
+  /** Check out an existing branch. Fails (GitError) if switching away from a dirty tree —
+   *  a no-op when already on `branch`. Used before a build to target the task's branch. */
+  async checkoutBranch(repoPath: string, branch: string): Promise<void> {
+    await this.git(repoPath, ['checkout', branch]);
   }
 
   private async resolveBaseRef(repoPath: string, baseRef: string): Promise<string> {
@@ -140,66 +124,50 @@ export class GitService {
     throw new GitError(`base ref not found: "${baseRef}" (nor "origin/${baseRef}")`);
   }
 
-  async listWorktrees(repoPath: string): Promise<ParsedWorktree[]> {
-    const out = await this.git(repoPath, ['worktree', 'list', '--porcelain']);
-    const entries: ParsedWorktree[] = [];
-    let cur: Partial<ParsedWorktree> = {};
-    for (const line of out.split('\n')) {
-      if (line === '') {
-        if (cur.path) entries.push(cur as ParsedWorktree);
-        cur = {};
-        continue;
-      }
-      const sp = line.indexOf(' ');
-      const key = sp === -1 ? line : line.slice(0, sp);
-      const val = sp === -1 ? '' : line.slice(sp + 1);
-      if (key === 'worktree') cur.path = val;
-      else if (key === 'branch') cur.branch = val.replace(/^refs\/heads\//, '');
-      else if (key === 'HEAD') cur.head = val;
+  /**
+   * Start a task **in place**: create branch `claude/<slug>` in the project checkout, branched
+   * from the resolved base, and leave the checkout on it. Requires a clean working tree so no
+   * uncommitted work is lost or mixed between tasks (the caller serializes to one task at a time).
+   * Returns `path` = the project dir (we no longer use a separate worktree).
+   */
+  async createTaskBranch(repoPath: string, opts: CreateWorktreeOpts): Promise<WorktreeInfo> {
+    assertTaskId(opts.taskId);
+    if (!(await this.isClean(repoPath))) {
+      throw new GitError(
+        'working tree is not clean; commit or discard the active task before starting a new one',
+      );
     }
-    if (cur.path) entries.push(cur as ParsedWorktree);
-    return entries;
-  }
-
-  async createWorktree(repoPath: string, opts: CreateWorktreeOpts): Promise<WorktreeInfo> {
-    const path = this.worktreePath(repoPath, opts.taskId);
-    if (existsSync(path)) {
-      throw new GitError(`worktree path already exists: ${path}`);
-    }
-    await this.ensureExcluded(repoPath);
     const baseRef = await this.resolveBaseRef(repoPath, opts.baseRef);
     const slug = opts.slug ?? slugify(opts.name ?? opts.taskId);
 
     for (let n = 1; n <= 50; n++) {
       const branch = n === 1 ? `claude/${slug}` : `claude/${slug}-${n}`;
       try {
-        await this.git(repoPath, ['worktree', 'add', '-b', branch, path, baseRef]);
-        return { taskId: opts.taskId, slug, branch, path, baseRef };
+        await this.git(repoPath, ['checkout', '-b', branch, baseRef]);
+        return { taskId: opts.taskId, slug, branch, path: repoPath, baseRef };
       } catch (err) {
-        if (isBranchExistsError(err)) continue; // race/collision: try next suffix
+        if (isBranchExistsError(err)) continue; // name taken: try the next suffix
         throw err;
       }
     }
     throw new GitError(`could not find a free branch name for slug "${slug}"`);
   }
 
-  /** Remove a task's worktree and (by default) delete its claude/* branch. */
-  async removeWorktree(
-    repoPath: string,
-    taskId: string,
-    opts: { deleteBranch?: boolean; force?: boolean } = {},
-  ): Promise<void> {
-    const { deleteBranch = true, force = true } = opts;
-    const path = this.worktreePath(repoPath, taskId);
-    const entry = (await this.listWorktrees(repoPath)).find((w) => w.path === path);
-
-    await this.git(repoPath, ['worktree', 'remove', ...(force ? ['--force'] : []), path]);
-
-    if (deleteBranch && entry?.branch && entry.branch.startsWith('claude/')) {
+  /**
+   * Discard a task: drop its uncommitted work, return the checkout to the base branch, and
+   * delete its `claude/*` branch. Destructive to the shared checkout by design — the caller
+   * must only call this for the task that currently owns the project.
+   */
+  async discardTaskBranch(repoPath: string, branch: string, baseRef: string): Promise<void> {
+    const base = await this.resolveBaseRef(repoPath, baseRef);
+    await this.git(repoPath, ['reset', '--hard']);
+    await this.git(repoPath, ['clean', '-fd']); // drop untracked files (gitignored ones kept)
+    await this.git(repoPath, ['checkout', base]);
+    if (branch && branch.startsWith('claude/')) {
       try {
-        await this.git(repoPath, ['branch', '-D', entry.branch]);
+        await this.git(repoPath, ['branch', '-D', branch]);
       } catch {
-        // Branch may already be gone; discard is best-effort.
+        // Branch may not exist yet / already gone; discard is best-effort.
       }
     }
   }

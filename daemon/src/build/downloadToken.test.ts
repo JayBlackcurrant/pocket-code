@@ -29,7 +29,8 @@ describe('download token', () => {
     const exp = Date.now() + 60_000;
     const token = signDownloadToken(SECRET, 'b1', exp);
     const [e, sig] = token.split('.');
-    expect(verifyDownloadToken(SECRET, 'b1', `${e}.${sig!.slice(0, -1)}0`)).toBe(false);
+    const flipped = sig!.slice(-1) === '0' ? '1' : '0'; // deterministically change the last hex char
+    expect(verifyDownloadToken(SECRET, 'b1', `${e}.${sig!.slice(0, -1)}${flipped}`)).toBe(false);
     // Push the expiry out without re-signing → signature no longer matches.
     expect(verifyDownloadToken(SECRET, 'b1', `${Number(e) + 1}.${sig}`)).toBe(false);
   });

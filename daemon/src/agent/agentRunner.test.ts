@@ -9,7 +9,7 @@ import { GitService, runGit } from '../git/gitService.js';
 import { openDb, type Db } from '../db/db.js';
 import { EventLog } from '../db/eventLog.js';
 import { TaskStore } from '../db/taskStore.js';
-import { AgentRunner, type QueryFn } from './agentRunner.js';
+import { AgentRunner, ProjectBusyError, type QueryFn } from './agentRunner.js';
 
 let repo: string;
 let registry: ProjectRegistry;
@@ -251,5 +251,36 @@ describe('AgentRunner', () => {
     const types = events.since(started.taskId, 0).map((e) => e.type);
     expect(types).toContain('agent.permission_auto_allowed');
     expect(types).not.toContain('agent.permission_request');
+  });
+
+  it('runs one task at a time per project (rejects a second while one is active)', async () => {
+    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: cancellableQuery() });
+    const first = await runner.start({ projectId: 'hedged', prompt: 'first long' });
+    // A second start while the first still owns the checkout is refused.
+    await expect(runner.start({ projectId: 'hedged', prompt: 'second' })).rejects.toThrow(ProjectBusyError);
+    // Once the first is done, the project frees up and a new task can start.
+    await runner.cancel(first.taskId);
+    await runner.whenSettled(first.taskId);
+    const next = await runner.start({ projectId: 'hedged', prompt: 'after' });
+    expect(next.taskId).toBeTruthy(); // the project was free again
+    await runner.cancel(next.taskId); // this query also blocks; cancel to settle
+    await runner.whenSettled(next.taskId);
+  });
+
+  it('denies an edit whose path escapes the project directory', async () => {
+    const runner = new AgentRunner({
+      registry,
+      git: new GitService(),
+      tasks,
+      events,
+      db,
+      query: toolQuery('Write', { file_path: '/etc/evil.txt', content: 'x' }),
+    });
+    const started = await runner.start({ projectId: 'hedged', prompt: 'escape edit' });
+    await runner.whenSettled(started.taskId);
+
+    const denied = events.since(started.taskId, 0).find((e) => e.type === 'agent.permission_auto_denied');
+    expect((denied?.payload as { reason?: string } | undefined)?.reason).toMatch(/outside the project directory/);
+    expect(events.since(started.taskId, 0).map((e) => e.type)).not.toContain('agent.permission_request');
   });
 });

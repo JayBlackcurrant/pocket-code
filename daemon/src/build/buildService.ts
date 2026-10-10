@@ -9,6 +9,7 @@ import type { TaskStore } from '../db/taskStore.js';
 import { BuildStore, type BuildRow } from '../db/buildStore.js';
 import { BuildLog, type StoredBuildEvent } from '../db/buildLog.js';
 import { resolveBuildFlavor } from '../guardrails.js';
+import { GitError, GitService } from '../git/gitService.js';
 
 /** Minimal structured logger; fastify's `app.log` satisfies it. */
 export interface BuildLogger {
@@ -54,11 +55,13 @@ export interface BuildServiceDeps {
   /** Defaults to the real spawn-based runner. Tests pass a fake. */
   runStep?: RunStep;
   logger?: BuildLogger;
+  /** Git service, used to check out a task's branch before building it. Defaults to a real one. */
+  git?: GitService;
 }
 
 export interface EnqueueBuildInput {
   projectId: string;
-  /** Build a task's reviewed worktree instead of the project's main checkout. */
+  /** Build a task's branch (checked out in the project dir) instead of the current checkout. */
   taskId?: string;
   /** Overrides manifest flavorDefault; still subject to the staging-only guardrail. */
   flavor?: string;
@@ -147,6 +150,7 @@ export class BuildService {
   private readonly buildLog: BuildLog;
   private readonly tasks: TaskStore;
   private readonly runStep: RunStep;
+  private readonly git: GitService;
   private log: BuildLogger;
 
   private readonly queue: string[] = [];
@@ -156,7 +160,15 @@ export class BuildService {
   /** Per-build runtime plan, kept out of the DB (commands are derived from the manifest). */
   private readonly plan = new Map<
     string,
-    { manifest: ProjectManifest; cwd: string; flavor: string; runCodegen: boolean; mainRepoPath: string }
+    {
+      manifest: ProjectManifest;
+      cwd: string;
+      flavor: string;
+      runCodegen: boolean;
+      mainRepoPath: string;
+      /** Task branch to check out before building, when this build is for a task. */
+      branch?: string;
+    }
   >();
   private draining = false;
 
@@ -166,6 +178,7 @@ export class BuildService {
     this.buildLog = deps.buildLog;
     this.tasks = deps.tasks;
     this.runStep = deps.runStep ?? spawnRunStep;
+    this.git = deps.git ?? new GitService();
     this.log = deps.logger ?? noopLogger;
   }
 
@@ -238,15 +251,18 @@ export class BuildService {
     }
     const manifest = project.manifest;
 
-    let cwd = project.resolvedPath;
+    // Tasks run in the project checkout now (not a worktree), so builds always run there; a
+    // task build just checks out that task's branch first (done in runBuild).
+    const cwd = project.resolvedPath;
+    let branch: string | undefined;
     if (input.taskId !== undefined) {
       const task = this.tasks.get(input.taskId);
       if (!task) throw new BuildError(`unknown task: "${input.taskId}"`);
       if (task.projectId !== manifest.id) {
         throw new BuildError(`task "${input.taskId}" does not belong to project "${manifest.id}"`);
       }
-      if (!task.worktree) throw new BuildError(`task "${input.taskId}" has no worktree yet`);
-      cwd = task.worktree;
+      if (!task.branch) throw new BuildError(`task "${input.taskId}" has no branch yet`);
+      branch = task.branch;
     }
 
     // Guardrail: a forbidden flavor (e.g. production during the pilot) throws here, before
@@ -282,6 +298,7 @@ export class BuildService {
       flavor,
       runCodegen,
       mainRepoPath: project.resolvedPath,
+      ...(branch !== undefined ? { branch } : {}),
     });
     void this.drain();
     return row;
@@ -352,8 +369,20 @@ export class BuildService {
     this.aborts.set(buildId, abort);
 
     this.builds.markStarted(buildId);
-    this.persist(buildId, 'build.started', { cwd, flavor: plan.flavor });
+    this.persist(buildId, 'build.started', { cwd, flavor: plan.flavor, branch: plan.branch ?? null });
     this.log.info({ buildId, projectId: manifest.id, flavor: plan.flavor }, 'build started');
+
+    // For a task build, put the shared checkout on the task's branch first (no-op if already
+    // there; fails clearly if the tree is dirty on a different branch).
+    if (plan.branch) {
+      try {
+        await this.git.checkoutBranch(cwd, plan.branch);
+      } catch (err) {
+        const reason = err instanceof GitError ? err.message : String(err);
+        this.failBuild(buildId, `could not check out task branch "${plan.branch}": ${reason}`, null);
+        return;
+      }
+    }
 
     // Surface a missing sibling backend clearly instead of running a doomed codegen step.
     if (runCodegen && manifest.codegen.requiresSibling) {
@@ -382,14 +411,14 @@ export class BuildService {
         return;
       }
 
-      // A step may run in a worktree subdirectory (e.g. `dir: api`). Resolve it inside the
-      // worktree — reject any `..`/symlink escape rather than running outside it.
+      // A step may run in a project subdirectory (e.g. `dir: api`). Resolve it inside the
+      // project dir — reject any `..`/symlink escape rather than running outside it.
       let stepCwd = cwd;
       if (stepDir && stepDir !== '.') {
         try {
           stepCwd = safeResolveWithin(cwd, stepDir);
         } catch {
-          this.failBuild(buildId, `codegen step dir "${stepDir}" escapes the worktree`, null);
+          this.failBuild(buildId, `codegen step dir "${stepDir}" escapes the project directory`, null);
           return;
         }
       }

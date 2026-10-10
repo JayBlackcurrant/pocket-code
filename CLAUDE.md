@@ -99,11 +99,16 @@ Two Claude Code instances work on this repo — one on the always-on Mac (daemon
 - Notifications must not contain code or secrets.
 - Follow the repo's `analysis_options.yaml`. Prefer `const` constructors and small widgets.
 
-## Git and worktree rules
+## Git and task-branch rules
 
-- One worktree per task under `.worktrees/<task-id>`, branch `claude/<slug>`.
+- Tasks run **in the project checkout** on branch `claude/<slug>` (no worktrees — the checkout
+  has the gitignored local files, e.g. signing keys, that builds need). **One task at a time per
+  project:** starting a second task while one is active (running/waiting) is refused with a 409.
+- Edits are contained to the project dir: the daemon denies any `Edit`/`Write` whose path escapes it.
 - Use `git diff --numstat` for summaries and per-file `git diff --no-color -U3` for patches.
-- Discard a task by removing the worktree and deleting the branch. Do not use `git reset --hard` on shared branches.
+- Discard a task by dropping its changes (`git reset --hard` + `git clean -fd`), checking out the
+  base, and deleting its `claude/*` branch. This is daemon-only and only for the active task; the
+  agent never runs `git reset --hard` itself.
 
 ## Build rules (Android)
 

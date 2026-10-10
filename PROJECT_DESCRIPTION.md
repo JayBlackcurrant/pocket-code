@@ -56,7 +56,7 @@ MacBook (dedicated macOS user "agent")
    relayd (Node/TypeScript daemon, LaunchAgent)
     ├─ REST + WebSocket API (Fastify)
     ├─ Agent runner (Claude Agent SDK, one query per task)
-    ├─ Git service (one worktree + branch per task)
+    ├─ Git service (one task branch per project, run in place)
     ├─ Build service (flutter build apk → Firebase CLI upload)
     ├─ SQLite (tasks, events, approvals, builds, devices)
     └─ Notifier (firebase-admin → FCM)
@@ -67,7 +67,7 @@ MacBook (dedicated macOS user "agent")
 | Component | Responsibility |
 |-----------|----------------|
 | **Flutter app** (`/app`) | UI: projects, task stream, approvals, diff/code viewer, builds, settings |
-| **Daemon** (`/daemon`) | Runs Claude Code via Agent SDK, manages git worktrees, builds, notifications, API |
+| **Daemon** (`/daemon`) | Runs Claude Code via Agent SDK, manages git task branches, builds, notifications, API |
 | **Docs** (`/docs`) | Project description, sprint plan, roadmap |
 
 ## 8. Key design decisions
@@ -76,7 +76,7 @@ MacBook (dedicated macOS user "agent")
 |----------|--------|-----|
 | Daemon language | TypeScript (Node LTS) | Agent SDK is first-class in TypeScript; Firebase tooling is Node-native |
 | Driving Claude Code | Claude Agent SDK `query()` | Gives cancel, resume, permission callback (`canUseTool`), and streaming |
-| Task isolation | One git worktree and branch (`claude/<slug>`) per task | Parallel tasks, trivial discard, clean diff base |
+| Task isolation | One task at a time per project, run in the checkout on branch `claude/<slug>`; edits contained to the project dir | Simple model; builds see local/gitignored files; clean diff base |
 | Event delivery | Every event stored in SQLite with a sequence number, then streamed | Phone can disconnect and replay missed events with `since=<seq>` |
 | Approvals | Parked `canUseTool` promise, resolved from the phone | Agent keeps waiting while the phone is offline |
 | Remote access | Tailscale, daemon bound to Tailscale interface or localhost behind `tailscale serve` | No public exposure, end-to-end encrypted |
@@ -90,7 +90,7 @@ MacBook (dedicated macOS user "agent")
 | Method and path | Purpose |
 |---|---|
 | `GET /projects`, `POST /projects` | List or register repos (allowlisted paths only) |
-| `POST /projects/:id/tasks` | Create worktree and start a task |
+| `POST /projects/:id/tasks` | Create the task branch and start a task (409 if one is already active) |
 | `POST /tasks/:id/messages` | Follow-up prompt on the same session |
 | `POST /tasks/:id/cancel` | Interrupt a running task |
 | `POST /tasks/:id/permissions/:toolUseId` | Allow or deny a pending tool call |
@@ -107,7 +107,7 @@ MacBook (dedicated macOS user "agent")
 2. Agent runs as a dedicated **non-admin** macOS user that owns only `~/workspaces`.
 3. No production credentials, personal SSH keys, or browser profiles on that user.
 4. Claude Code sandbox on (filesystem and network). Network allowlist: pub.dev, GitHub, Google Maven, Firebase.
-5. Permission rules: auto-allow edits inside the worktree and `flutter analyze`, `flutter test`, `dart format`, read-only git. Everything else needs phone approval. Deny `sudo`, `rm -rf`, `curl | sh`, keychain commands, and `git push` by the agent (the daemon pushes).
+5. Permission rules: auto-allow edits inside the project dir (paths that escape it are denied) and `flutter analyze`, `flutter test`, `dart format`, read-only git. Everything else needs phone approval. Deny `sudo`, `rm -rf`, `curl | sh`, keychain commands, and `git push` by the agent (the daemon pushes).
 6. `bypassPermissions` mode is never used.
 7. Secrets (API key, Firebase service account, tokens) live in the agent user's Keychain or a `0600` env file, outside any repo Claude can read.
 8. Sensitive actions in the app (push, build and distribute, "always allow") require biometric confirmation.
@@ -136,7 +136,7 @@ MacBook (dedicated macOS user "agent")
 |------|------------|
 | Anthropic credential or billing rules change again | Use API key or bundled credits; keep Remote Control as a fallback |
 | Rate limits stall tasks | Surface limit errors in the app; cap concurrency to 1-2 tasks |
-| Agent damages repo or leaks secrets | Worktrees, branch protection, sandbox, dedicated user |
+| Agent damages repo or leaks secrets | Edit-path containment to the project dir, task branch (base protected), sandbox, dedicated user |
 | MacBook sleeps or runs out of battery | `pmset`, plugged in, charge limit, uptime alert |
 | Large diffs or logs freeze the app | Paginate per file, virtualized lists, size caps (about 3,000 lines or 500 KB per file) |
 | Android build fails on the Mac | Pin Flutter and Java versions; fall back to CI |
