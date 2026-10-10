@@ -17,7 +17,8 @@
 | Area | State |
 |------|-------|
 | Daemon code (Sprint 1: S1-01…S1-07) | ✅ present & passing |
-| Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** (50/50 tests) |
+| Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
+| Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** (77/77 tests) |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
@@ -62,6 +63,23 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S2-02 permission rules + sandbox — built on the dev machine
+Layered on top of S2-01 (pull + restart to run):
+- New `src/agent/permissionRules.ts`: before a tool call parks, it's evaluated — **deny**
+  (dangerous: `sudo`, `rm -r`, `curl|sh`, `git push`, keychain, shutdown, mkfs, dd to device)
+  → refused immediately, **never runs**; **allow** (read-only tools, edits, and single safe
+  commands: `flutter/dart analyze|test`, `dart format`, read-only `git`) → auto-approved;
+  everything else → asks the phone. Deny always wins (checked before allow), so
+  `flutter test && sudo rm -rf /` is denied.
+- Sandbox ON by default (`src/agent/sandbox.ts`): `sandbox.enabled` + network allowlist
+  (pub.dev, GitHub, Google Maven, Firebase). Toggle with **`RELAYD_SANDBOX=off`** in `env.sh`
+  if a real build fails under the sandbox while investigating. `autoAllowBashIfSandboxed` is
+  left off so bash still goes through the rules.
+- **Tested:** typecheck clean; **77/77** tests (new `permissionRules.test.ts` 25 cases +
+  2 runner tests proving a dangerous command is auto-denied and never parked/run).
+- **➡️ Action on this Mac:** `git pull` + restart. Watch the first real task: if a `flutter`
+  build fails oddly, try `RELAYD_SANDBOX=off` and note it here.
 
 ### 2026-10-10 — S2-01 approvals (canUseTool bridge) — built on the dev machine
 Daemon code for **S2-01** landed (authored from the dev Mac; this Mac must `git pull` +

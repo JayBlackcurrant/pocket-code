@@ -15,7 +15,14 @@ async function main(): Promise<void> {
   const db = openDb(env.dbPath);
   const tasks = new TaskStore(db);
   const events = new EventLog(db);
-  const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db });
+  const runner = new AgentRunner({
+    registry,
+    git: new GitService(),
+    tasks,
+    events,
+    db,
+    ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
+  });
 
   const app = await buildServer({ env, registry, db, runner, tasks, events });
 

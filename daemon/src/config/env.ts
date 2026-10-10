@@ -19,6 +19,9 @@ const EnvSchema = z.object({
   // Base URL phones should connect to (e.g. the Tailscale MagicDNS URL). The pairing
   // QR uses this; it is NOT the bind address. Falls back to http://host:port.
   RELAYD_ADVERTISE_URL: z.string().url().optional(),
+  // Command-execution sandbox for agent tasks (CLAUDE.md: on). Set to "off" only if a
+  // build fails under the sandbox while you investigate.
+  RELAYD_SANDBOX: z.enum(['on', 'off']).default('on'),
 });
 
 export type DaemonEnv = {
@@ -29,6 +32,7 @@ export type DaemonEnv = {
   workspacesDir: string | undefined;
   allowedRoots: string[];
   advertiseUrl: string;
+  sandboxEnabled: boolean;
 };
 
 /** Hosts that would expose the daemon publicly. Binding to these is refused. */
@@ -55,5 +59,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): DaemonEnv {
       .map((s) => s.trim())
       .filter((s) => s.length > 0),
     advertiseUrl: parsed.RELAYD_ADVERTISE_URL ?? `http://${parsed.RELAYD_HOST}:${parsed.RELAYD_PORT}`,
+    sandboxEnabled: parsed.RELAYD_SANDBOX === 'on',
   };
 }

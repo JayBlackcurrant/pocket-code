@@ -64,6 +64,28 @@ function cancellableQuery(): QueryFn {
   };
 }
 
+/** Fake query that invokes canUseTool once with the given tool, then finishes. */
+function toolQuery(toolName: string, input: Record<string, unknown>): QueryFn {
+  return ({ options }) => {
+    const gen = (async function* () {
+      yield sysInit;
+      const res = await options!.canUseTool!(toolName, input, {
+        toolUseID: 'tu1',
+        signal: options!.abortController!.signal,
+      } as never);
+      yield {
+        type: 'assistant',
+        session_id: 'sess-1',
+        message: { content: [{ type: 'text', text: res.behavior }] },
+      } as unknown as SDKMessage;
+      yield resultOk;
+    })();
+    const q = gen as unknown as Query;
+    (q as unknown as { interrupt: () => Promise<void> }).interrupt = async () => undefined;
+    return q;
+  };
+}
+
 beforeAll(async () => {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'pc-runner-')));
   repo = join(base, 'hedged');
@@ -193,5 +215,41 @@ describe('AgentRunner', () => {
   it('rejects an unknown or inactive project', async () => {
     const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: fakeQuery([]) });
     await expect(runner.start({ projectId: 'nope', prompt: 'x' })).rejects.toThrow(/not active/);
+  });
+
+  it('auto-denies a dangerous command without parking it (S2-02)', async () => {
+    const runner = new AgentRunner({
+      registry,
+      git: new GitService(),
+      tasks,
+      events,
+      db,
+      query: toolQuery('Bash', { command: 'sudo rm -rf /' }),
+    });
+    const started = await runner.start({ projectId: 'hedged', prompt: 'danger' });
+    await runner.whenSettled(started.taskId);
+
+    expect(runner.listPendingPermissions(started.taskId)).toHaveLength(0);
+    const types = events.since(started.taskId, 0).map((e) => e.type);
+    expect(types).toContain('agent.permission_auto_denied');
+    expect(types).not.toContain('agent.permission_request'); // never asked the phone
+  });
+
+  it('auto-allows a safe command without parking it (S2-02)', async () => {
+    const runner = new AgentRunner({
+      registry,
+      git: new GitService(),
+      tasks,
+      events,
+      db,
+      query: toolQuery('Bash', { command: 'flutter test' }),
+    });
+    const started = await runner.start({ projectId: 'hedged', prompt: 'safe' });
+    await runner.whenSettled(started.taskId);
+
+    expect(runner.listPendingPermissions(started.taskId)).toHaveLength(0);
+    const types = events.since(started.taskId, 0).map((e) => e.type);
+    expect(types).toContain('agent.permission_auto_allowed');
+    expect(types).not.toContain('agent.permission_request');
   });
 });

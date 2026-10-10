@@ -4,7 +4,9 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type {
   Options,
   PermissionMode,
+  PermissionResult,
   Query,
+  SandboxSettings,
   SDKMessage,
   SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -14,6 +16,8 @@ import type { TaskStore } from '../db/taskStore.js';
 import type { EventLog, StoredEvent } from '../db/eventLog.js';
 import type { Db } from '../db/db.js';
 import { PermissionBroker, type Decision, type PendingPermission } from './permissionBroker.js';
+import { evaluatePermission } from './permissionRules.js';
+import { defaultSandbox } from './sandbox.js';
 
 /** The slice of the SDK `query()` the runner uses — injectable for testing. */
 export type QueryFn = (params: { prompt: string; options?: Options }) => Query;
@@ -28,6 +32,8 @@ export interface AgentRunnerDeps {
   query?: QueryFn;
   /** Permission mode for runs. Never `bypassPermissions` (CLAUDE.md). */
   defaultPermissionMode?: PermissionMode;
+  /** Command-execution sandbox. Omit for the default (on); `false` disables it. */
+  sandbox?: SandboxSettings | false;
 }
 
 export interface StartTaskInput {
@@ -69,6 +75,7 @@ export class AgentRunner {
   private readonly events: EventLog;
   private readonly query: QueryFn;
   private readonly defaultPermissionMode: PermissionMode;
+  private readonly sandbox: SandboxSettings | undefined;
 
   private readonly emitter = new EventEmitter();
   private readonly running = new Map<string, { query: Query; abort: AbortController }>();
@@ -86,6 +93,7 @@ export class AgentRunner {
       throw new Error('bypassPermissions is not allowed');
     }
     this.broker = new PermissionBroker(deps.db, (t, ty, p) => this.persist(t, ty, p), deps.tasks);
+    this.sandbox = deps.sandbox === false ? undefined : (deps.sandbox ?? defaultSandbox());
   }
 
   /** Resolve a pending tool permission from the phone (S2-01). */
@@ -173,10 +181,28 @@ export class AgentRunner {
       cwd,
       abortController: abort,
       permissionMode: this.defaultPermissionMode,
-      // The canUseTool bridge (S2-01): tools needing permission park until the phone
-      // decides. Edits are auto-accepted by `acceptEdits`; other tools come through here.
-      canUseTool: (toolName, toolInput, opts) =>
-        this.broker.request(taskId, opts.toolUseID, toolName, toolInput, opts.signal),
+      // Permission rules (S2-02) run first: dangerous tools are denied and never run,
+      // safe ones are auto-allowed; everything else parks for the phone (S2-01).
+      canUseTool: (toolName, toolInput, opts): Promise<PermissionResult> => {
+        const rule = evaluatePermission(toolName, toolInput);
+        if (rule.decision === 'deny') {
+          this.persist(taskId, 'agent.permission_auto_denied', {
+            toolUseId: opts.toolUseID,
+            toolName,
+            reason: rule.reason,
+          });
+          return Promise.resolve({ behavior: 'deny', message: rule.reason ?? 'denied by policy' });
+        }
+        if (rule.decision === 'allow') {
+          this.persist(taskId, 'agent.permission_auto_allowed', {
+            toolUseId: opts.toolUseID,
+            toolName,
+          });
+          return Promise.resolve({ behavior: 'allow', updatedInput: toolInput });
+        }
+        return this.broker.request(taskId, opts.toolUseID, toolName, toolInput, opts.signal);
+      },
+      ...(this.sandbox ? { sandbox: this.sandbox } : {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
     };
 
