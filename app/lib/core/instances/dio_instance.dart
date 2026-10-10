@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../interceptors/auth_interceptor.dart';
+import '../interceptors/logging_interceptor.dart';
 
 /// Builds a configured Dio for the daemon (mirrors hedged's DioInstance: base options
 /// + interceptor chain). The bearer token is supplied per request via [getToken].
@@ -19,8 +20,7 @@ Dio buildDio({
   );
   dio.interceptors.add(AuthInterceptor(getToken));
   if (kDebugMode) {
-    dio.interceptors
-        .add(LogInterceptor(requestBody: false, responseBody: false));
+    dio.interceptors.add(LoggingInterceptor());
   }
   return dio;
 }
