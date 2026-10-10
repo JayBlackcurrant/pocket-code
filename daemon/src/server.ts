@@ -1,3 +1,5 @@
+import { createReadStream, existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import { z } from 'zod';
@@ -28,6 +30,7 @@ import { GitError, type GitService } from './git/gitService.js';
 import { branchBlockedReason, GuardrailError } from './guardrails.js';
 import { BuildService, BuildError } from './build/buildService.js';
 import { DistributionService, DistributionError } from './build/distributionService.js';
+import { verifyDownloadToken } from './build/downloadToken.js';
 import { ReleaseNotesService, ReleaseNotesError } from './build/releaseNotes.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
 import type { NotificationService } from './notify/notificationService.js';
@@ -59,7 +62,9 @@ function projectSummary(p: RegisteredProject) {
     allowedFlavors: m.allowedFlavors,
     base: m.git.base,
     remote: m.git.remote,
-    hasDistribution: m.distribution.firebaseAppDistribution !== undefined,
+    hasDistribution:
+      m.distribution.firebaseAppDistribution !== undefined ||
+      m.distribution.tailscaleServe !== undefined,
   };
 }
 
@@ -584,6 +589,27 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       throw err;
     }
   });
+
+  // Download a build's APK via a signed, time-limited link (tailscaleServe distribution).
+  // Deliberately NOT behind `auth`: a tester opens this in a browser, which has no bearer token.
+  // The `t` token (HMAC over buildId+expiry, signed by the daemon) gates access, and exposure is
+  // tailnet-only via `tailscale serve` (never a public Funnel). The artifact path is daemon-
+  // produced, not client input.
+  app.get<{ Params: { id: string }; Querystring: { t?: string } }>(
+    '/builds/:id/apk',
+    async (req, reply) => {
+      if (!verifyDownloadToken(deps.env.downloadSecret, req.params.id, req.query.t ?? '')) {
+        return reply.code(403).send({ error: 'invalid or expired download token' });
+      }
+      const build = deps.builds.get(req.params.id);
+      if (!build || !build.artifact || !existsSync(build.artifact)) {
+        return reply.code(404).send({ error: 'no downloadable artifact for this build' });
+      }
+      reply.header('Content-Type', 'application/vnd.android.package-archive');
+      reply.header('Content-Disposition', `attachment; filename="${basename(build.artifact)}"`);
+      return reply.send(createReadStream(build.artifact));
+    },
+  );
 
   // Live build log with replay (same shape as the task stream): replay everything after
   // `since` from SQLite, then tail live. A reconnecting phone passes its last seen seq.

@@ -37,7 +37,14 @@ async function main(): Promise<void> {
   // Long jobs run under `caffeinate -i` so the Mac stays awake mid-build (S3-08).
   const runStep = makeSpawnRunStep({ caffeinate: env.caffeinate });
   const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks, runStep });
-  const distribution = new DistributionService({ registry, builds: buildStore, buildLog, runStep });
+  const distribution = new DistributionService({
+    registry,
+    builds: buildStore,
+    buildLog,
+    runStep,
+    advertiseUrl: env.advertiseUrl,
+    downloadSecret: env.downloadSecret,
+  });
   const releaseNotes = new ReleaseNotesService({ registry, tasks, git });
   // Self-contained notifications (S3-05): derived from the existing task + build event streams.
   const notifications = new NotificationService({

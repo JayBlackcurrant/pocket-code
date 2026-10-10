@@ -68,17 +68,14 @@ git:
   commitStyle: conventional      # type(scope): summary
   agentMayPush: false            # daemon pushes; agent never runs `git push`
 
-# ---- Distribution: Firebase App Distribution (NEW — provision for staging) ----
+# ---- Distribution: Tailscale-served APK link (keyless — no Firebase service account) ----
+# The daemon serves the built APK over its own Tailscale HTTPS and hands the app a signed,
+# time-limited download link (GET /builds/:id/apk?t=...). Testers must be on the tailnet.
+# To switch back to Firebase, replace this block with a `firebaseAppDistribution:` block —
+# the schema still supports it.
 distribution:
-  firebaseAppDistribution:
-    firebaseProject: hedged-core-staging
-    appId: <STAGING_ANDROID_APP_ID>     # create in Firebase console
-    groups:
-      - <INTERNAL_TESTER_GROUP>
-    serviceAccountEnv: GOOGLE_APPLICATION_CREDENTIALS
-    uploadCmd: >-
-      firebase appdistribution:distribute {apk}
-      --app {appId} --groups {groups} --release-notes-file {notesFile}
+  tailscaleServe:
+    linkTtlMinutes: 10080        # download-link validity (7 days)
 
 # ---- Hard guardrail enforced by the daemon for the pilot ----
 guardrails:

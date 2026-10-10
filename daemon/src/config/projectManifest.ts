@@ -45,8 +45,19 @@ const FirebaseAppDistSchema = z.object({
   uploadCmd: z.string(),
 });
 
+/**
+ * Keyless distribution: the daemon serves the built APK over its own Tailscale HTTPS and
+ * hands the app a signed, time-limited download link. No Google service account required;
+ * testers must be on the tailnet.
+ */
+const TailscaleServeSchema = z.object({
+  // How long a generated download link stays valid (minutes). Default 7 days, max 30.
+  linkTtlMinutes: z.number().int().positive().max(43_200).default(10_080),
+});
+
 const DistributionSchema = z.object({
   firebaseAppDistribution: FirebaseAppDistSchema.optional(),
+  tailscaleServe: TailscaleServeSchema.optional(),
 });
 
 const GuardrailsSchema = z.object({

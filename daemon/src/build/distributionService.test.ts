@@ -9,6 +9,7 @@ import { BuildStore } from '../db/buildStore.js';
 import { BuildLog } from '../db/buildLog.js';
 import type { RunStep } from './buildService.js';
 import { buildUploadArgv, DistributionService } from './distributionService.js';
+import { verifyDownloadToken } from './downloadToken.js';
 
 let repo: string;
 let db: Db;
@@ -198,5 +199,85 @@ describe('DistributionService.upload', () => {
     store.markSucceeded('b1', join(repo, 'does-not-exist.apk'));
     const svc = mkService(mkRegistry(manifest(repo)), async () => ({ code: 0 }));
     expect(() => svc.upload('b1')).toThrow(/no APK artifact/);
+  });
+});
+
+function tailscaleManifest(repoPath: string): string {
+  return `
+id: hedged
+displayName: Hedged (staging)
+path: ${repoPath}
+flutter: fvm
+flavorDefault: staging
+allowedFlavors: [staging]
+build:
+  apk: "fvm flutter build apk --flavor staging --release"
+signing:
+  mode: in-repo
+git:
+  remote: origin
+  base: stag
+distribution:
+  tailscaleServe:
+    linkTtlMinutes: 10080
+`;
+}
+
+const ADVERTISE_URL = 'https://mac.tail1234.ts.net';
+const DL_SECRET = 'tailscale-test-secret-1234567890';
+
+describe('DistributionService.upload — tailscaleServe (keyless)', () => {
+  it('serves a signed download link without any credential and never runs a command', async () => {
+    succeededBuild();
+    let ranCommand = false;
+    const svc = new DistributionService({
+      registry: mkRegistry(tailscaleManifest(repo)),
+      builds: store,
+      buildLog,
+      runStep: async () => {
+        ranCommand = true;
+        return { code: 0 };
+      },
+      env: {}, // no GOOGLE_APPLICATION_CREDENTIALS — must not be required
+      advertiseUrl: ADVERTISE_URL,
+      downloadSecret: DL_SECRET,
+    });
+
+    svc.upload('b1');
+    await svc.whenSettled('b1');
+
+    expect(ranCommand).toBe(false); // keyless path spawns nothing
+
+    const row = store.get('b1')!;
+    expect(row.uploadStatus).toBe('uploaded');
+    expect(row.releaseUrl).not.toBeNull();
+
+    const url = new URL(row.releaseUrl!);
+    expect(url.origin).toBe(ADVERTISE_URL);
+    expect(url.pathname).toBe('/builds/b1/apk');
+    const token = url.searchParams.get('t')!;
+    expect(verifyDownloadToken(DL_SECRET, 'b1', token)).toBe(true);
+    expect(verifyDownloadToken(DL_SECRET, 'other', token)).toBe(false);
+
+    const types = buildLog.since('b1', 0).map((e) => e.type);
+    expect(types).toContain('build.upload_started');
+    expect(types).toContain('build.upload_completed');
+  });
+
+  it('fails cleanly when no advertise URL is configured', async () => {
+    succeededBuild();
+    const svc = new DistributionService({
+      registry: mkRegistry(tailscaleManifest(repo)),
+      builds: store,
+      buildLog,
+      env: {},
+      advertiseUrl: '', // RELAYD_ADVERTISE_URL unset
+      downloadSecret: DL_SECRET,
+    });
+    svc.upload('b1');
+    await svc.whenSettled('b1');
+    const row = store.get('b1')!;
+    expect(row.uploadStatus).toBe('failed');
+    expect(row.uploadError).toMatch(/advertise URL/);
   });
 });

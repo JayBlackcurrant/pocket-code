@@ -7,6 +7,7 @@ import type { BuildStore } from '../db/buildStore.js';
 import type { BuildLog } from '../db/buildLog.js';
 import { firebaseProjectBlockedReason } from '../guardrails.js';
 import { spawnRunStep, tokenizeCommand, type RunStep, type BuildLogger } from './buildService.js';
+import { signDownloadToken } from './downloadToken.js';
 
 const noopLogger: BuildLogger = { info: () => {}, warn: () => {}, error: () => {} };
 
@@ -30,6 +31,10 @@ export interface DistributionServiceDeps {
   logger?: BuildLogger;
   /** Env to read the service-account credential from. Defaults to process.env. */
   env?: NodeJS.ProcessEnv;
+  /** Public base URL (Tailscale MagicDNS) used to build tailscaleServe download links. */
+  advertiseUrl?: string;
+  /** Secret used to sign tailscaleServe download links. */
+  downloadSecret?: string;
 }
 
 export interface UploadInput {
@@ -81,6 +86,8 @@ export class DistributionService {
   private readonly buildLog: BuildLog;
   private readonly runStep: RunStep;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly advertiseUrl: string;
+  private readonly downloadSecret: string;
   private log: BuildLogger;
 
   private readonly settled = new Map<string, Promise<void>>();
@@ -91,6 +98,8 @@ export class DistributionService {
     this.buildLog = deps.buildLog;
     this.runStep = deps.runStep ?? spawnRunStep;
     this.env = deps.env ?? process.env;
+    this.advertiseUrl = deps.advertiseUrl ?? '';
+    this.downloadSecret = deps.downloadSecret ?? '';
     this.log = deps.logger ?? noopLogger;
   }
 
@@ -130,9 +139,23 @@ export class DistributionService {
       throw new DistributionError(`project not active: "${build.projectId}"`);
     }
     const manifest = project.manifest;
+
+    // Keyless distribution: serve the APK over the daemon's Tailscale HTTPS and hand the app a
+    // signed, time-limited download link. No service account, no external CLI. Takes precedence
+    // when configured; falls through to Firebase otherwise.
+    const serve = manifest.distribution.tailscaleServe;
+    if (serve) {
+      const run = this.runServeDistribution(buildId, serve);
+      this.settled.set(buildId, run);
+      run.catch(() => {
+        /* failures are recorded as events + on the row; never crash the daemon */
+      });
+      return;
+    }
+
     const dist = manifest.distribution.firebaseAppDistribution;
     if (!dist) {
-      throw new DistributionError(`project "${manifest.id}" has no firebaseAppDistribution configured`);
+      throw new DistributionError(`project "${manifest.id}" has no distribution method configured`);
     }
 
     // Guardrail: refuse a forbidden Firebase project (e.g. production during the pilot).
@@ -243,6 +266,42 @@ export class DistributionService {
     } finally {
       rmSync(notesDir, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * Keyless "upload": mark the build distributed and hand back a signed, time-limited link to
+   * the APK served by this daemon over Tailscale. No child process runs; the work is synchronous,
+   * so this resolves immediately (kept Promise-shaped to mirror runUpload for `whenSettled`).
+   */
+  private runServeDistribution(
+    buildId: string,
+    serve: NonNullable<ProjectManifest['distribution']['tailscaleServe']>,
+  ): Promise<void> {
+    this.builds.markUploading(buildId);
+    this.persist(buildId, 'build.upload_started', { method: 'tailscale' });
+    this.log.info({ buildId, method: 'tailscale' }, 'serve distribution started');
+
+    try {
+      if (!this.advertiseUrl) {
+        throw new Error(
+          'no advertise URL configured (set RELAYD_ADVERTISE_URL to the Tailscale MagicDNS URL)',
+        );
+      }
+      const expiresAt = Date.now() + serve.linkTtlMinutes * 60_000;
+      const token = signDownloadToken(this.downloadSecret, buildId, expiresAt);
+      const base = this.advertiseUrl.replace(/\/+$/, '');
+      const releaseUrl = `${base}/builds/${encodeURIComponent(buildId)}/apk?t=${token}`;
+
+      this.builds.markUploaded(buildId, releaseUrl);
+      this.persist(buildId, 'build.upload_completed', { releaseUrl });
+      this.log.info({ buildId }, 'serve distribution completed');
+    } catch (err) {
+      const reason = `serve distribution failed: ${err instanceof Error ? err.message : String(err)}`;
+      this.builds.markUploadFailed(buildId, reason);
+      this.persist(buildId, 'build.upload_error', { reason, exitCode: null });
+      this.log.error({ buildId, reason }, 'serve distribution failed');
+    }
+    return Promise.resolve();
   }
 }
 

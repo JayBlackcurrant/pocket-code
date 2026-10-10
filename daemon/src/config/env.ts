@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
 /**
@@ -27,6 +28,10 @@ const EnvSchema = z.object({
   // Wrap long build/upload jobs in `caffeinate -i` so the Mac doesn't idle-sleep mid-build
   // (S3-08). macOS only; no-op elsewhere. Set "off" to disable.
   RELAYD_CAFFEINATE: z.enum(['on', 'off']).default('on'),
+  // Secret used to sign Tailscale-served APK download links. If unset, a random per-process
+  // secret is used — links then become invalid after a daemon restart (just re-ship). Set a
+  // stable value in env.sh to keep download links valid across restarts.
+  RELAYD_DOWNLOAD_SECRET: z.string().min(16).optional(),
 });
 
 export type DaemonEnv = {
@@ -40,6 +45,7 @@ export type DaemonEnv = {
   sandboxEnabled: boolean;
   approvalTimeoutMs: number;
   caffeinate: boolean;
+  downloadSecret: string;
 };
 
 /** Hosts that would expose the daemon publicly. Binding to these is refused. */
@@ -69,5 +75,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): DaemonEnv {
     sandboxEnabled: parsed.RELAYD_SANDBOX === 'on',
     approvalTimeoutMs: parsed.RELAYD_APPROVAL_TIMEOUT_MINUTES * 60_000,
     caffeinate: parsed.RELAYD_CAFFEINATE === 'on',
+    downloadSecret: parsed.RELAYD_DOWNLOAD_SECRET ?? randomBytes(32).toString('hex'),
   };
 }
