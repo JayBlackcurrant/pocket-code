@@ -20,10 +20,18 @@ export interface Decision {
 
 type PersistFn = (taskId: string, type: string, payload: unknown) => void;
 
+/** Default: deny a parked tool call after 2 hours so runs never hang forever (S2-03). */
+export const DEFAULT_APPROVAL_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+const TIMEOUT_MESSAGE =
+  'User unavailable: no approval within the time limit. Stop and summarize what you have done so far.';
+
 interface Parked {
   taskId: string;
+  toolName: string;
   input: Record<string, unknown>;
   resolve: (result: PermissionResult) => void;
+  timer?: NodeJS.Timeout;
 }
 
 /**
@@ -39,6 +47,8 @@ export class PermissionBroker {
     private readonly db: Db,
     private readonly persist: PersistFn,
     private readonly tasks: TaskStore,
+    /** Deny a parked request after this long (<=0 waits indefinitely). */
+    private readonly timeoutMs: number = DEFAULT_APPROVAL_TIMEOUT_MS,
   ) {}
 
   /** Called from the agent's canUseTool callback. Resolves when the phone decides. */
@@ -60,7 +70,8 @@ export class PermissionBroker {
     this.persist(taskId, 'agent.permission_request', { toolUseId, toolName, input });
 
     return new Promise<PermissionResult>((resolve) => {
-      this.parked.set(toolUseId, { taskId, input, resolve });
+      const parked: Parked = { taskId, toolName, input, resolve };
+      this.parked.set(toolUseId, parked);
 
       // If the task is cancelled while waiting, stop waiting (deny + interrupt).
       if (signal.aborted) {
@@ -72,12 +83,33 @@ export class PermissionBroker {
         () => this.settle(toolUseId, { behavior: 'deny', message: 'cancelled', interrupt: true }),
         { once: true },
       );
+
+      // Approval timeout (S2-03): deny with guidance to stop and summarize.
+      if (this.timeoutMs > 0 && Number.isFinite(this.timeoutMs)) {
+        parked.timer = setTimeout(() => this.onTimeout(toolUseId), this.timeoutMs);
+      }
     });
+  }
+
+  private onTimeout(toolUseId: string): void {
+    const parked = this.parked.get(toolUseId);
+    if (!parked) return;
+    this.db
+      .prepare('UPDATE approvals SET status = ?, reason = ?, decided_at = ? WHERE id = ?')
+      .run('timed_out', TIMEOUT_MESSAGE, Date.now(), toolUseId);
+    this.persist(parked.taskId, 'agent.permission_timeout', {
+      toolUseId,
+      toolName: parked.toolName,
+    });
+    this.tasks.setStatus(parked.taskId, 'running');
+    // interrupt:false → the model receives the guidance and summarizes rather than aborting.
+    this.settle(toolUseId, { behavior: 'deny', message: TIMEOUT_MESSAGE, interrupt: false });
   }
 
   private settle(toolUseId: string, result: PermissionResult): void {
     const parked = this.parked.get(toolUseId);
     if (!parked) return;
+    if (parked.timer) clearTimeout(parked.timer);
     this.parked.delete(toolUseId);
     parked.resolve(result);
   }

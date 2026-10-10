@@ -63,4 +63,41 @@ describe('PermissionBroker', () => {
     expect(result.behavior).toBe('deny');
     if (result.behavior === 'deny') expect(result.interrupt).toBe(true);
   });
+
+  it('auto-denies with a timeout message when no decision arrives (S2-03)', async () => {
+    const fast = new PermissionBroker(
+      db,
+      (taskId, type, payload) => events.push({ taskId, type, payload }),
+      tasks,
+      30, // 30ms timeout
+    );
+    const result = await fast.request(
+      't1',
+      'tu-timeout',
+      'Bash',
+      { command: 'npm run deploy' },
+      new AbortController().signal,
+    );
+    expect(result.behavior).toBe('deny');
+    if (result.behavior === 'deny') {
+      expect(result.message).toMatch(/User unavailable/);
+      expect(result.interrupt).toBe(false); // model should summarize, not hard-abort
+    }
+    expect(fast.listPending('t1')).toHaveLength(0);
+    expect(events.some((e) => e.type === 'agent.permission_timeout')).toBe(true);
+  });
+
+  it('a decision before the timeout cancels the timer', async () => {
+    const fast = new PermissionBroker(
+      db,
+      (taskId, type, payload) => events.push({ taskId, type, payload }),
+      tasks,
+      40,
+    );
+    const p = fast.request('t1', 'tu-race', 'Bash', { command: 'x' }, new AbortController().signal);
+    expect(fast.decide('t1', 'tu-race', { allow: true })).toBe(true);
+    expect((await p).behavior).toBe('allow');
+    await new Promise((r) => setTimeout(r, 80)); // past the timeout window
+    expect(events.some((e) => e.type === 'agent.permission_timeout')).toBe(false);
+  });
 });

@@ -34,6 +34,8 @@ export interface AgentRunnerDeps {
   defaultPermissionMode?: PermissionMode;
   /** Command-execution sandbox. Omit for the default (on); `false` disables it. */
   sandbox?: SandboxSettings | false;
+  /** Deny a parked permission after this long (ms). Omit for the default (2h). */
+  approvalTimeoutMs?: number;
 }
 
 export interface StartTaskInput {
@@ -92,7 +94,12 @@ export class AgentRunner {
     if (this.defaultPermissionMode === 'bypassPermissions') {
       throw new Error('bypassPermissions is not allowed');
     }
-    this.broker = new PermissionBroker(deps.db, (t, ty, p) => this.persist(t, ty, p), deps.tasks);
+    this.broker = new PermissionBroker(
+      deps.db,
+      (t, ty, p) => this.persist(t, ty, p),
+      deps.tasks,
+      deps.approvalTimeoutMs,
+    );
     this.sandbox = deps.sandbox === false ? undefined : (deps.sandbox ?? defaultSandbox());
   }
 

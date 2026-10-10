@@ -18,7 +18,8 @@
 |------|-------|
 | Daemon code (Sprint 1: S1-01…S1-07) | ✅ present & passing |
 | Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** (77/77 tests) |
+| Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
+| Approval timeout (S2-03) | ✅ code done (dev machine) — **needs `git pull` + restart here** (79/79 tests) |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
@@ -63,6 +64,14 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S2-03 approval timeout — built on the dev machine
+- A parked permission now auto-denies after a timeout (default **120 min**, env
+  `RELAYD_APPROVAL_TIMEOUT_MINUTES`, `0` = wait forever) with the message *"User unavailable…
+  stop and summarize"* and `interrupt:false` so the agent wraps up instead of hanging. Emits
+  `agent.permission_timeout`; approval row → `timed_out`. Decision/abort clears the timer.
+- **Tested:** 79/79 (2 new broker tests: fires on timeout; a decision cancels the timer).
+- **➡️ Action on this Mac:** `git pull` + restart (picks up S2-01/02/03 together).
 
 ### 2026-10-10 — S2-02 permission rules + sandbox — built on the dev machine
 Layered on top of S2-01 (pull + restart to run):

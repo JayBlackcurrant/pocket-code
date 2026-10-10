@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     tasks,
     events,
     db,
+    approvalTimeoutMs: env.approvalTimeoutMs,
     ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
   });
 

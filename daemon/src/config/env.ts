@@ -22,6 +22,8 @@ const EnvSchema = z.object({
   // Command-execution sandbox for agent tasks (CLAUDE.md: on). Set to "off" only if a
   // build fails under the sandbox while you investigate.
   RELAYD_SANDBOX: z.enum(['on', 'off']).default('on'),
+  // Auto-deny a pending phone approval after this many minutes so runs never hang (S2-03).
+  RELAYD_APPROVAL_TIMEOUT_MINUTES: z.coerce.number().min(0).default(120),
 });
 
 export type DaemonEnv = {
@@ -33,6 +35,7 @@ export type DaemonEnv = {
   allowedRoots: string[];
   advertiseUrl: string;
   sandboxEnabled: boolean;
+  approvalTimeoutMs: number;
 };
 
 /** Hosts that would expose the daemon publicly. Binding to these is refused. */
@@ -60,5 +63,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): DaemonEnv {
       .filter((s) => s.length > 0),
     advertiseUrl: parsed.RELAYD_ADVERTISE_URL ?? `http://${parsed.RELAYD_HOST}:${parsed.RELAYD_PORT}`,
     sandboxEnabled: parsed.RELAYD_SANDBOX === 'on',
+    approvalTimeoutMs: parsed.RELAYD_APPROVAL_TIMEOUT_MINUTES * 60_000,
   };
 }
