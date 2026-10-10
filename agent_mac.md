@@ -76,6 +76,21 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-10 — hedged codegen: skip dart-api-generator (backend not on this Mac) — dev side
+First real build on the always-on Mac failed with the intended clear error: *"codegen requires
+sibling checkout ../hedged-core-backend … which is missing"* — the backend repo isn't checked
+out here, and hedged's `dart-api-generator.sh` also hardcodes a dev-Mac absolute path to
+swagger.yaml (so cloning alone wouldn't fix it).
+- **Decision (user):** skip `dart-api-generator.sh` for now; run only `fvm flutter pub get` +
+  `fvm dart run build_runner build`. Safe because the `api/` package is **committed** in hedged
+  (a `path: ./api` dep, 2035 files tracked) and `build_runner` only needs annotations — no
+  backend. Removed `codegen.requiresSibling` from `hedged.yaml` so the build no longer fails fast.
+- **Caveat:** the committed `api/` may lag the latest backend swagger until we wire the backend
+  up. Follow-up: re-add `requiresSibling` + the generator step once the backend is available and
+  the generator reads the backend path from the daemon (worktree-safe) instead of a hardcoded one.
+- **Tested (dev):** daemon typecheck clean, 161 tests pass (config-only change). **➡️ Action on
+  this Mac:** `git pull` + restart, then re-run the build (pub get + build_runner only).
+
 ### 2026-10-10 — replaced Firebase App Distribution with a keyless Tailscale-served link (this Mac)
 User had no Firebase service-account key and wanted a keyless replacement with minimal change.
 Planned (plan mode) and implemented on branch `claude/tailscale-distribution` (`8e856ec`):

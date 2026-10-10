@@ -26,13 +26,14 @@ allowedFlavors:
   - staging        # production / development are intentionally omitted
 
 # ---- Codegen: run before any build and after editing providers/routes/models. ----
-# dart-api-generator.sh regenerates the local api/ package from the backend OpenAPI
-# spec and REQUIRES the sibling backend checkout to be present next to the app.
+# TEMPORARY (backend not on the always-on Mac yet): we skip dart-api-generator.sh, which
+# regenerates the local api/ package from the backend OpenAPI spec and needs the sibling
+# backend checkout. The api/ package is committed in the repo, so pub get + build_runner
+# alone compile fine; the committed api/ may lag the latest backend swagger until we wire
+# the backend up (then re-add `requiresSibling` + the "./dart-api-generator.sh" step).
 codegen:
-  requiresSibling: ../hedged-core-backend
   steps:
     - "fvm flutter pub get"
-    - "./dart-api-generator.sh"
     - "fvm dart run build_runner build --delete-conflicting-outputs"
 # Never hand-edit generated files; collapse them in diff review.
 generatedGlobs:
