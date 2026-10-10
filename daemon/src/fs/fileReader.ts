@@ -23,6 +23,56 @@ export interface TreeEntry {
 }
 
 /**
+ * Recursively find files under `root` whose relative path matches `query`
+ * (case-insensitive substring) for @-mention autocomplete. Bounded: scans at most
+ * `maxScan` files and returns at most `limit`, so a huge repo can't stall the daemon.
+ * Basename matches and shorter paths rank first.
+ */
+export function searchFiles(
+  root: string,
+  query: string,
+  { limit = 50, maxScan = 20000 }: { limit?: number; maxScan?: number } = {},
+): string[] {
+  const q = query.toLowerCase();
+  const matches: string[] = [];
+  let scanned = 0;
+
+  const walk = (dir: string): void => {
+    if (matches.length >= limit || scanned >= maxScan) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (matches.length >= limit || scanned >= maxScan) return;
+      if (IGNORED_NAMES.has(e.name)) continue;
+      const abs = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(abs);
+      } else {
+        scanned++;
+        const rel = relative(root, abs);
+        if (q === '' || rel.toLowerCase().includes(q)) matches.push(rel);
+      }
+    }
+  };
+  walk(root);
+
+  matches.sort((a, b) => {
+    const an = a.slice(a.lastIndexOf('/') + 1).toLowerCase();
+    const bn = b.slice(b.lastIndexOf('/') + 1).toLowerCase();
+    const aHit = q !== '' && an.includes(q) ? 0 : 1;
+    const bHit = q !== '' && bn.includes(q) ? 0 : 1;
+    if (aHit !== bHit) return aHit - bHit;
+    if (a.length !== b.length) return a.length - b.length;
+    return a.localeCompare(b);
+  });
+  return matches.slice(0, limit);
+}
+
+/**
  * List one directory inside `root` (S: project browser), path-safe. Directories first,
  * then files, both alphabetical. Heavy/noise entries are hidden. Non-recursive — the
  * client expands folders on demand.

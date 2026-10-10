@@ -24,6 +24,16 @@ Future<List<TreeEntry>> projectTree(
       .toList();
 }
 
+/// Search project files for @-mention autocomplete (GET /projects/:id/search?q=).
+@riverpod
+Future<List<String>> projectSearch(
+    Ref ref, String projectId, String query) async {
+  final dio = ref.watch(apiProvider);
+  final res = await dio.get<dynamic>('/projects/$projectId/search',
+      queryParameters: {'q': query}).guard();
+  return (res.data['matches'] as List).cast<String>();
+}
+
 /// Read a project file (GET /projects/:id/files?path=).
 @riverpod
 Future<FileContent> projectFile(Ref ref, String projectId, String path) async {

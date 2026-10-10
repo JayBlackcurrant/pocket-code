@@ -69,6 +69,12 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-10 — Project file search endpoint — built on the dev machine
+- `GET /projects/:id/search?q=` for @-mention autocomplete: recursive `searchFiles`
+  (`fs/fileReader.ts`), bounded (≤50 results, ≤20k files scanned), hides the same heavy dirs,
+  basename/short-path ranking. Active projects only. **Tested:** 102/102 (3 search cases).
+- **➡️ Action on this Mac:** `git pull` + restart (serves the new search endpoint).
+
 ### 2026-10-10 — Project browser endpoints — built on the dev machine
 - New project-scoped, path-safe endpoints for the app's project browser:
   `GET /projects/:id/tree?path=` (one directory; dirs first; hides .git/node_modules/build/

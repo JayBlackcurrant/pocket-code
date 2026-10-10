@@ -9,6 +9,7 @@ import {
   NotADirectoryError,
   listDir,
   readFileSafe,
+  searchFiles,
 } from './fileReader.js';
 
 let root: string;
@@ -78,5 +79,22 @@ describe('listDir', () => {
 
   it('rejects a non-directory', () => {
     expect(() => listDir(root, 'blob.bin')).toThrow(NotADirectoryError);
+  });
+});
+
+describe('searchFiles', () => {
+  it('finds files by substring (basename first)', () => {
+    expect(searchFiles(root, 'main')).toContain('lib/main.dart');
+    expect(searchFiles(root, 'dart')).toContain('lib/main.dart');
+  });
+
+  it('empty query returns files (not directories)', () => {
+    const all = searchFiles(root, '');
+    expect(all).toContain('lib/main.dart');
+    expect(all.every((p) => !p.endsWith('/'))).toBe(true);
+  });
+
+  it('respects the result limit', () => {
+    expect(searchFiles(root, '', { limit: 1 }).length).toBe(1);
   });
 });

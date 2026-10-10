@@ -15,6 +15,7 @@ import { PathNotAllowedError } from './fs/pathSafety.js';
 import {
   readFileSafe,
   listDir,
+  searchFiles,
   FileNotFoundError,
   NotAFileError,
   NotADirectoryError,
@@ -173,6 +174,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (err instanceof NotADirectoryError) return reply.code(400).send({ error: err.message });
         throw err;
       }
+    },
+  );
+
+  // Search project files for @-mention autocomplete (q may be empty for top results).
+  app.get<{ Params: { id: string }; Querystring: { q?: string } }>(
+    '/projects/:id/search',
+    auth,
+    async (req, reply) => {
+      const project = deps.registry.getActive(req.params.id);
+      if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+      const q = (req.query.q ?? '').slice(0, 200);
+      return { matches: searchFiles(project.resolvedPath, q) };
     },
   );
 

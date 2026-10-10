@@ -78,6 +78,16 @@
 
 ## Log
 
+### 2026-10-10 — @path autocomplete in the prompt box
+- Typing `@` in the project composer shows a live file-suggestion panel (just above the input)
+  from `GET /projects/:id/search?q=` (provider `projectSearch`). Selecting a suggestion attaches
+  the file (chip) and removes the `@token` from the text. Pure `parseActiveMention` finds the
+  active mention from text+cursor (mention starts at `@` at start/after whitespace; whitespace
+  ends it). New: `project/mention.dart`, `projectSearch` provider.
+- **Tested:** `analyze` clean, `flutter test` 25/25 (5 mention-parser cases). Overlay UX not
+  widget-tested; verify on device.
+- Daemon: `GET /projects/:id/search` (agent_mac.md) — agent Mac must pull+restart.
+
 ### 2026-10-10 — Project browser + attach-files prompt (new UX)
 - Tapping a project now opens `ProjectPage` (route `/projects/:projectId/browse`) instead of
   the old new-task screen: a **file browser** (directory navigator via `GET /projects/:id/tree`,

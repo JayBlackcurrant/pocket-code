@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/extension/context.dart';
 import '../../routes/app_router.dart';
 import '../../tasks/providers/new_task_controller.dart';
+import '../mention.dart';
 import '../models/tree_entry.dart';
 import '../providers/project_providers.dart';
 
@@ -25,11 +26,43 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
   final TextEditingController _prompt = TextEditingController();
   String _dir = ''; // current directory, relative to repo root
   final List<String> _attachments = [];
+  ActiveMention? _mention; // active @mention the cursor is in, if any
+
+  @override
+  void initState() {
+    super.initState();
+    _prompt.addListener(_onPromptChanged);
+  }
 
   @override
   void dispose() {
+    _prompt.removeListener(_onPromptChanged);
     _prompt.dispose();
     super.dispose();
+  }
+
+  void _onPromptChanged() {
+    final sel = _prompt.selection;
+    final cursor = sel.isValid ? sel.baseOffset : _prompt.text.length;
+    final next = parseActiveMention(_prompt.text, cursor);
+    final changed =
+        next?.start != _mention?.start || next?.query != _mention?.query;
+    if (changed) setState(() => _mention = next);
+  }
+
+  void _selectSuggestion(String path) {
+    final m = _mention;
+    if (m == null) return;
+    final end = m.start + 1 + m.query.length;
+    final newText = _prompt.text.replaceRange(m.start, end, '');
+    _prompt.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: m.start),
+    );
+    setState(() {
+      if (!_attachments.contains(path)) _attachments.add(path);
+      _mention = null;
+    });
   }
 
   void _openDir(String path) => setState(() => _dir = path);
@@ -95,6 +128,7 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
               ),
             ),
           ),
+          if (_mention != null) _suggestions(context),
           _composer(context, creating),
         ],
       ),
@@ -158,6 +192,45 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
     );
   }
 
+  Widget _suggestions(BuildContext context) {
+    final results =
+        ref.watch(projectSearchProvider(widget.projectId, _mention!.query));
+    return results.maybeWhen(
+      data: (matches) {
+        if (matches.isEmpty) return const SizedBox.shrink();
+        return Container(
+          constraints: const BoxConstraints(maxHeight: 180),
+          decoration: BoxDecoration(
+            color: context.colors.surface,
+            border: Border(top: BorderSide(color: context.colors.border)),
+          ),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: matches.length,
+            itemBuilder: (_, i) {
+              final p = matches[i];
+              return ListTile(
+                dense: true,
+                leading: Icon(Icons.insert_drive_file_outlined,
+                    size: 18, color: context.colors.muted),
+                title: Text(p.split('/').last, style: context.text.regular14),
+                subtitle: Text(
+                  p,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.regular12
+                      .copyWith(color: context.colors.muted),
+                ),
+                onTap: () => _selectSuggestion(p),
+              );
+            },
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
   Widget _composer(BuildContext context, bool busy) {
     return SafeArea(
       top: false,
@@ -197,7 +270,7 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
                     minLines: 1,
                     maxLines: 5,
                     decoration: const InputDecoration(
-                      hintText: 'Ask Claude to change this project…',
+                      hintText: 'Ask Claude… (type @ to attach a file)',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),

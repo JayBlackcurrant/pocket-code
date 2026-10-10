@@ -110,6 +110,108 @@ final class ProjectTreeFamily extends $Family
   String toString() => r'projectTreeProvider';
 }
 
+/// Search project files for @-mention autocomplete (GET /projects/:id/search?q=).
+
+@ProviderFor(projectSearch)
+const projectSearchProvider = ProjectSearchFamily._();
+
+/// Search project files for @-mention autocomplete (GET /projects/:id/search?q=).
+
+final class ProjectSearchProvider extends $FunctionalProvider<
+        AsyncValue<List<String>>, List<String>, FutureOr<List<String>>>
+    with $FutureModifier<List<String>>, $FutureProvider<List<String>> {
+  /// Search project files for @-mention autocomplete (GET /projects/:id/search?q=).
+  const ProjectSearchProvider._(
+      {required ProjectSearchFamily super.from,
+      required (
+        String,
+        String,
+      )
+          super.argument})
+      : super(
+          retry: null,
+          name: r'projectSearchProvider',
+          isAutoDispose: true,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$projectSearchHash();
+
+  @override
+  String toString() {
+    return r'projectSearchProvider'
+        ''
+        '$argument';
+  }
+
+  @$internal
+  @override
+  $FutureProviderElement<List<String>> $createElement(
+          $ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<List<String>> create(Ref ref) {
+    final argument = this.argument as (
+      String,
+      String,
+    );
+    return projectSearch(
+      ref,
+      argument.$1,
+      argument.$2,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ProjectSearchProvider && other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$projectSearchHash() => r'e2200f712b5e7c160208c999c6c17f6182b11efc';
+
+/// Search project files for @-mention autocomplete (GET /projects/:id/search?q=).
+
+final class ProjectSearchFamily extends $Family
+    with
+        $FunctionalFamilyOverride<
+            FutureOr<List<String>>,
+            (
+              String,
+              String,
+            )> {
+  const ProjectSearchFamily._()
+      : super(
+          retry: null,
+          name: r'projectSearchProvider',
+          dependencies: null,
+          $allTransitiveDependencies: null,
+          isAutoDispose: true,
+        );
+
+  /// Search project files for @-mention autocomplete (GET /projects/:id/search?q=).
+
+  ProjectSearchProvider call(
+    String projectId,
+    String query,
+  ) =>
+      ProjectSearchProvider._(argument: (
+        projectId,
+        query,
+      ), from: this);
+
+  @override
+  String toString() => r'projectSearchProvider';
+}
+
 /// Read a project file (GET /projects/:id/files?path=).
 
 @ProviderFor(projectFile)
