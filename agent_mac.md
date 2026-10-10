@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — S3-01 build service + S3-02 Firebase upload built on the dev machine (serial build queue + live log stream + distribute step); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
+**Last updated:** 2026-10-10 — S3-01 build + S3-02 upload + S3-03 release notes built on the dev machine (serial build queue + live log stream + distribute step + AI release notes); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
 
 ---
 
@@ -18,7 +18,7 @@
 |------|-------|
 | Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
-| Daemon Sprint 3 (S3-01 build + S3-02 upload) | 🟡 **built on dev machine** (typecheck clean, 123 tests) — not yet pulled/run here; no real `flutter build` or Firebase upload exercised |
+| Daemon Sprint 3 (S3-01 build + S3-02 upload + S3-03 notes) | 🟡 **built on dev machine** (typecheck clean, 134 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised |
 | Firebase App Distribution (hedged staging) | ⬜ **not provisioned** — manifest `appId`/`groups` are still `<placeholders>`; upload refuses until a real staging app id + tester group + service-account creds exist |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
@@ -70,6 +70,22 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S3-03 release-notes generation — built on the dev machine
+- New `ReleaseNotesService` (`src/build/releaseNotes.ts`): generates **≤8 tester-facing
+  bullets** for a task by **resuming that task's Claude session** (SDK `query` with
+  `resume: sessionId`, `allowedTools: []`, `maxTurns: 1` — text-only, no tools, never edits),
+  reading the final `result` text and parsing bullets. 60s timeout via AbortController.
+- **Robust fallback:** no `sessionId`, or the session call fails / times out / returns no
+  bullets → **diff-derived** notes from `diffSummary` (verbs by status, generated files
+  skipped, overflow folded into "…and N more"). The app always gets something to edit.
+- New endpoint `GET /tasks/:id/release-notes` → `{ notes: string[], source: 'session'|'diff' }`.
+  Editing happens app-side (S3-06); the edited text is passed to `POST /builds/:id/upload`
+  `{releaseNotes}` (S3-02 already accepts it). `query` defaults to the real SDK in production.
+- **Tested:** typecheck clean, **134/134** (11 new: parseBullets marker-strip/cap/preamble/
+  plain-lines, bulletsFromDiff verb-map/generated-skip/overflow, generate session-success,
+  no-session→diff, session-fail→diff, empty→diff, unknown-task + no-worktree errors).
+  **Not exercised:** a real session resume (needs the live Mac session store + credits).
 
 ### 2026-10-10 — S3-02 Firebase App Distribution upload — built on the dev machine
 - New `DistributionService` (`src/build/distributionService.ts`): uploads a **succeeded**

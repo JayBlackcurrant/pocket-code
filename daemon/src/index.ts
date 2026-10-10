@@ -9,6 +9,7 @@ import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
 import { BuildService } from './build/buildService.js';
 import { DistributionService } from './build/distributionService.js';
+import { ReleaseNotesService } from './build/releaseNotes.js';
 import { ProjectRegistry } from './registry/projectRegistry.js';
 import { buildServer } from './server.js';
 
@@ -33,12 +34,25 @@ async function main(): Promise<void> {
   });
   const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks });
   const distribution = new DistributionService({ registry, builds: buildStore, buildLog });
+  const releaseNotes = new ReleaseNotesService({ registry, tasks, git });
 
-  const app = await buildServer({ env, registry, db, runner, tasks, events, git, builds, distribution });
+  const app = await buildServer({
+    env,
+    registry,
+    db,
+    runner,
+    tasks,
+    events,
+    git,
+    builds,
+    distribution,
+    releaseNotes,
+  });
   // Route runner + build logs through fastify's pino logger (same stream as HTTP logs).
   runner.setLogger(app.log.child({ mod: 'agent' }));
   builds.setLogger(app.log.child({ mod: 'build' }));
   distribution.setLogger(app.log.child({ mod: 'build' }));
+  releaseNotes.setLogger(app.log.child({ mod: 'build' }));
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');

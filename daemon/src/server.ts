@@ -28,6 +28,7 @@ import { GitError, type GitService } from './git/gitService.js';
 import { branchBlockedReason, GuardrailError } from './guardrails.js';
 import { BuildService, BuildError } from './build/buildService.js';
 import { DistributionService, DistributionError } from './build/distributionService.js';
+import { ReleaseNotesService, ReleaseNotesError } from './build/releaseNotes.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
 
 export interface ServerDeps {
@@ -40,6 +41,7 @@ export interface ServerDeps {
   git: GitService;
   builds: BuildService;
   distribution: DistributionService;
+  releaseNotes: ReleaseNotesService;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */
@@ -359,6 +361,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const base = taskBaseRef(deps, task.projectId);
     if (!base) return reply.code(409).send({ error: 'unknown project base' });
     return { message: await deps.git.suggestCommitMessage(task.worktree, base) };
+  });
+
+  // Suggested tester-facing release notes (S3-03), editable in the app before upload.
+  // Asks the task's own Claude session for ≤8 bullets, falling back to diff-derived notes.
+  app.get<{ Params: { id: string } }>('/tasks/:id/release-notes', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+    try {
+      return await deps.releaseNotes.generate(req.params.id);
+    } catch (err) {
+      if (err instanceof ReleaseNotesError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
   });
 
   // Commit all changes with a (Claude/user) message.
