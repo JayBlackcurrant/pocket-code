@@ -20,7 +20,8 @@
 | Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
 | Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
 | Approval timeout (S2-03) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Diff endpoints (S2-05) | ✅ code done (dev machine) — **needs `git pull` + restart here** (85/85 tests) |
+| Diff endpoints (S2-05) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
+| File reader (S2-06) | ✅ code done (dev machine) — **needs `git pull` + restart here** (92/92 tests) |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
@@ -65,6 +66,16 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S2-06 file reader — built on the dev machine
+- `readFileSafe` (`src/fs/fileReader.ts`): read-only file read inside a task worktree, through
+  the same path-safety chokepoint (`..`/symlink escape → 403). Binary detection (null byte →
+  no text), size cap (512KB, `truncated` flag), typed errors for missing (404) / directory (400).
+- New endpoint: `GET /tasks/:id/files?path=` → `{ path, size, binary, truncated, content }`.
+- **Tested:** 92/92 (7 new reader tests incl. the **no-path-traversal** acceptance — `..` and
+  symlink escapes rejected — plus binary, truncation, missing, directory).
+- **➡️ Action on this Mac:** `git pull` + restart (no new env). Daemon read side for review is
+  now complete (S2-05 diff + S2-06 files); next is the app review UI (S2-07/08).
 
 ### 2026-10-10 — S2-05 diff endpoints — built on the dev machine
 - `GitService.diffSummary` / `diffFile` (in `src/git/gitService.ts`): changed files vs the

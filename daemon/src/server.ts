@@ -12,6 +12,7 @@ import {
   revokeDevice,
 } from './auth/store.js';
 import { PathNotAllowedError } from './fs/pathSafety.js';
+import { readFileSafe, FileNotFoundError, NotAFileError } from './fs/fileReader.js';
 import type { ProjectRegistry, RegisteredProject } from './registry/projectRegistry.js';
 import type { AgentRunner } from './agent/agentRunner.js';
 import type { TaskStore } from './db/taskStore.js';
@@ -220,6 +221,27 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       } catch (err) {
         if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
         if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  // Read one file from the task worktree (S2-06): read-only, path-safe.
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/tasks/:id/files',
+    auth,
+    async (req, reply) => {
+      const task = deps.tasks.get(req.params.id);
+      if (!task) return reply.code(404).send({ error: 'unknown task' });
+      if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+      const q = DiffQuery.safeParse(req.query);
+      if (!q.success) return reply.code(400).send({ error: 'path is required' });
+      try {
+        return readFileSafe(task.worktree, q.data.path);
+      } catch (err) {
+        if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
+        if (err instanceof FileNotFoundError) return reply.code(404).send({ error: err.message });
+        if (err instanceof NotAFileError) return reply.code(400).send({ error: err.message });
         throw err;
       }
     },
