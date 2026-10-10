@@ -34,6 +34,10 @@ allowedFlavors:
 codegen:
   steps:
     - "fvm flutter pub get"
+    # Generate the local api/ package first (it's a path dependency with its own build_runner),
+    # then the app at the worktree root.
+    - run: "fvm dart run build_runner build --delete-conflicting-outputs"
+      dir: api
     - "fvm dart run build_runner build --delete-conflicting-outputs"
 # Never hand-edit generated files; collapse them in diff review.
 generatedGlobs:

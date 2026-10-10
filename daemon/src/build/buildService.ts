@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
+import { safeResolveWithin } from '../fs/pathSafety.js';
 import type { ProjectManifest } from '../config/projectManifest.js';
 import type { ProjectRegistry } from '../registry/projectRegistry.js';
 import type { TaskStore } from '../db/taskStore.js';
@@ -373,18 +374,38 @@ export class BuildService {
     const steps = [...(runCodegen ? manifest.codegen.steps : []), apkCommand];
 
     for (let i = 0; i < steps.length; i++) {
-      const command = steps[i]!;
+      const rawStep = steps[i]!;
+      const command = typeof rawStep === 'string' ? rawStep : rawStep.run;
+      const stepDir = typeof rawStep === 'string' ? undefined : rawStep.dir;
       if (abort.signal.aborted) {
         this.finishCancelled(buildId);
         return;
       }
-      this.persist(buildId, 'build.step', { index: i, total: steps.length, command });
+
+      // A step may run in a worktree subdirectory (e.g. `dir: api`). Resolve it inside the
+      // worktree — reject any `..`/symlink escape rather than running outside it.
+      let stepCwd = cwd;
+      if (stepDir && stepDir !== '.') {
+        try {
+          stepCwd = safeResolveWithin(cwd, stepDir);
+        } catch {
+          this.failBuild(buildId, `codegen step dir "${stepDir}" escapes the worktree`, null);
+          return;
+        }
+      }
+
+      this.persist(buildId, 'build.step', {
+        index: i,
+        total: steps.length,
+        command,
+        ...(stepDir ? { dir: stepDir } : {}),
+      });
 
       let result: StepResult;
       try {
         result = await this.runStep({
           command,
-          cwd,
+          cwd: stepCwd,
           signal: abort.signal,
           onLine: (stream, line) => {
             const trimmed = line.length > MAX_LINE_LEN ? line.slice(0, MAX_LINE_LEN) : line;

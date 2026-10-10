@@ -333,4 +333,73 @@ describe('BuildService', () => {
     // Emitted events match what was persisted.
     expect(events.filter((e) => e.buildId === build.id).length).toBe(seqs.length);
   });
+
+  it('runs a codegen step in the subdirectory named by `dir`', async () => {
+    const seen: Array<{ command: string; cwd: string }> = [];
+    const runStep: RunStep = async ({ command, cwd }) => {
+      seen.push({ command, cwd });
+      return { code: 0 };
+    };
+    const yaml = `
+id: hedged
+path: ${repo}
+flavorDefault: staging
+allowedFlavors: [staging]
+codegen:
+  steps:
+    - "fvm flutter pub get"
+    - run: "fvm dart run build_runner build --delete-conflicting-outputs"
+      dir: api
+    - "fvm dart run build_runner build --delete-conflicting-outputs"
+build:
+  apk: "fvm flutter build apk --flavor staging --release"
+signing:
+  mode: in-repo
+git:
+  remote: origin
+  base: stag
+`;
+    const svc = mkService(mkRegistry(yaml), runStep);
+    const build = svc.enqueue({ projectId: 'hedged' });
+    await svc.whenSettled(build.id);
+
+    expect(svc.get(build.id)?.status).toBe('succeeded');
+    // 4 steps: pub get (root), build_runner (api), build_runner (root), apk (root).
+    expect(seen).toHaveLength(4);
+    expect(seen[1]!.cwd).toBe(join(repo, 'api')); // the api step ran in the subdirectory
+    expect(seen[0]!.cwd).toBe(seen[2]!.cwd); // the others ran at the worktree root
+    expect(seen[0]!.cwd).toBe(seen[3]!.cwd);
+    expect(seen[1]!.cwd).not.toBe(seen[0]!.cwd);
+
+    // The build.step event records the dir for the subdir step.
+    const stepEvents = svc.logsSince(build.id, 0).filter((e) => e.type === 'build.step');
+    expect((stepEvents[1]!.payload as { dir?: string }).dir).toBe('api');
+  });
+
+  it('fails the build when a codegen step `dir` escapes the worktree', async () => {
+    const runStep: RunStep = async () => ({ code: 0 });
+    const yaml = `
+id: hedged
+path: ${repo}
+flavorDefault: staging
+allowedFlavors: [staging]
+codegen:
+  steps:
+    - run: "fvm dart run build_runner build"
+      dir: "../escape"
+build:
+  apk: "fvm flutter build apk --flavor staging --release"
+signing:
+  mode: in-repo
+git:
+  remote: origin
+  base: stag
+`;
+    const svc = mkService(mkRegistry(yaml), runStep);
+    const build = svc.enqueue({ projectId: 'hedged' });
+    await svc.whenSettled(build.id);
+    const row = svc.get(build.id);
+    expect(row?.status).toBe('failed');
+    expect(row?.error).toMatch(/escapes the worktree/);
+  });
 });

@@ -8,9 +8,17 @@ import { z } from 'zod';
  * generic; everything that differs between the registered Flutter repos lives here.
  * See daemon/config/projects/hedged.yaml for the worked pilot example.
  */
+// A codegen step is either a bare command string (run at the worktree root) or an object
+// that also names a subdirectory to run it in (e.g. a path-dependency package like `api/`
+// that needs its own build_runner). `dir` is resolved inside the worktree, never outside.
+const CodegenStepSchema = z.union([
+  z.string(),
+  z.object({ run: z.string(), dir: z.string().optional() }),
+]);
+
 const CodegenSchema = z.object({
   requiresSibling: z.string().optional(),
-  steps: z.array(z.string()).default([]),
+  steps: z.array(CodegenStepSchema).default([]),
 });
 
 const BuildSchema = z.object({
