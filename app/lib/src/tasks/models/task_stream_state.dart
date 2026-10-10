@@ -1,9 +1,11 @@
 import '../task_feed.dart';
+import 'pending_approval.dart';
 
 /// UI state for the live task stream.
 class TaskStreamState {
   const TaskStreamState({
     required this.items,
+    required this.pending,
     required this.status,
     required this.connected,
     required this.caughtUp,
@@ -11,6 +13,7 @@ class TaskStreamState {
   });
 
   final List<FeedItem> items;
+  final List<PendingApproval> pending;
   final String status;
   final bool connected;
   final bool caughtUp;
@@ -18,6 +21,7 @@ class TaskStreamState {
 
   factory TaskStreamState.initial() => const TaskStreamState(
         items: [],
+        pending: [],
         status: 'connecting',
         connected: false,
         caughtUp: false,
@@ -31,6 +35,7 @@ class TaskStreamState {
 
   TaskStreamState copyWith({
     List<FeedItem>? items,
+    List<PendingApproval>? pending,
     String? status,
     bool? connected,
     bool? caughtUp,
@@ -39,6 +44,7 @@ class TaskStreamState {
   }) {
     return TaskStreamState(
       items: items ?? this.items,
+      pending: pending ?? this.pending,
       status: status ?? this.status,
       connected: connected ?? this.connected,
       caughtUp: caughtUp ?? this.caughtUp,

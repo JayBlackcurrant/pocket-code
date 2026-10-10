@@ -6,6 +6,7 @@ import 'package:web_socket_channel/io.dart';
 
 import '../../../core/instances/api_client.dart';
 import '../../shared/providers/pairing_provider.dart';
+import '../models/pending_approval.dart';
 import '../models/task_stream_state.dart';
 import '../task_feed.dart';
 
@@ -21,10 +22,14 @@ class TaskStream extends _$TaskStream {
   Timer? _retry;
   int _lastSeq = 0;
   bool _disposed = false;
+  late String _taskId;
   final List<FeedItem> _items = [];
+  final List<PendingApproval> _pending = [];
+  final Set<String> _autoAllow = {}; // tool names "always allowed" this session
 
   @override
   TaskStreamState build(String taskId) {
+    _taskId = taskId;
     ref.onDispose(_dispose);
     // Connect AFTER build returns — _connect mutates `state`, which is not yet
     // initialized while build() is running.
@@ -94,10 +99,75 @@ class TaskStream extends _$TaskStream {
         _items.removeRange(0, _items.length - 1000);
       }
     }
+    _applyPermission(type ?? '', map['payload']);
     state = state.copyWith(
       items: List.unmodifiable(_items),
+      pending: List.unmodifiable(_pending),
       status: statusFromEvent(type ?? '', map['payload']) ?? state.status,
     );
+  }
+
+  /// Fold permission events into the pending list (S2-04).
+  void _applyPermission(String type, dynamic payload) {
+    if (type == 'agent.permission_request') {
+      final p = payload is Map ? payload : const {};
+      final toolUseId = p['toolUseId']?.toString();
+      if (toolUseId == null) return;
+      final toolName = (p['toolName'] ?? 'tool').toString();
+      final input = p['input'] is Map
+          ? Map<String, dynamic>.from(p['input'] as Map)
+          : <String, dynamic>{};
+      if (_autoAllow.contains(toolName)) {
+        unawaited(_send(toolUseId, allow: true));
+        return;
+      }
+      if (!_pending.any((x) => x.toolUseId == toolUseId)) {
+        _pending.add(PendingApproval(
+            toolUseId: toolUseId, toolName: toolName, input: input));
+      }
+    } else if (type == 'agent.permission_decision' ||
+        type == 'agent.permission_timeout') {
+      final id = payload is Map ? payload['toolUseId']?.toString() : null;
+      if (id != null) _pending.removeWhere((x) => x.toolUseId == id);
+    }
+  }
+
+  /// Allow or deny a parked tool call (S2-04). Optimistically clears it locally.
+  Future<void> decide(String toolUseId,
+      {required bool allow, String? reason}) async {
+    _pending.removeWhere((x) => x.toolUseId == toolUseId);
+    state = state.copyWith(pending: List.unmodifiable(_pending));
+    await _send(toolUseId, allow: allow, reason: reason);
+  }
+
+  /// Always allow a tool for the rest of this session (approves current + future ones).
+  void alwaysAllow(String toolName) {
+    _autoAllow.add(toolName);
+    final ids = _pending
+        .where((x) => x.toolName == toolName)
+        .map((x) => x.toolUseId)
+        .toList();
+    _pending.removeWhere((x) => x.toolName == toolName);
+    state = state.copyWith(pending: List.unmodifiable(_pending));
+    for (final id in ids) {
+      unawaited(_send(id, allow: true));
+    }
+  }
+
+  Future<void> _send(String toolUseId,
+      {required bool allow, String? reason}) async {
+    final dio = ref.read(apiProvider);
+    try {
+      await dio.post<dynamic>(
+        '/tasks/$_taskId/permissions/$toolUseId',
+        data: {
+          'decision': allow ? 'allow' : 'deny',
+          if (reason != null && reason.isNotEmpty) 'reason': reason,
+        },
+      );
+    } catch (_) {
+      // Surfaced via the stream; ignore the HTTP-level failure here.
+    }
   }
 
   void _onDisconnect(String taskId) {

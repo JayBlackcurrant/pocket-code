@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../models/pending_approval.dart';
 import '../models/task_stream_state.dart';
 import '../providers/task_stream.dart';
 import '../task_feed.dart';
@@ -57,6 +58,15 @@ class _TaskPageState extends ConsumerState<TaskPage> {
         children: [
           if (!state.connected && !state.isTerminal) _connectingBanner(context),
           if (state.error != null) _errorBanner(context, state.error!),
+          for (final p in state.pending)
+            _ApprovalCard(
+              approval: p,
+              onDecide: (allow, reason) => ref
+                  .read(provider.notifier)
+                  .decide(p.toolUseId, allow: allow, reason: reason),
+              onAlwaysAllow: () =>
+                  ref.read(provider.notifier).alwaysAllow(p.toolName),
+            ),
           Expanded(
             child: state.items.isEmpty
                 ? Center(
@@ -237,6 +247,111 @@ class _FeedTile extends StatelessWidget {
                   : context.text.regular14,
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A parked tool call awaiting the user's decision (S2-04):
+/// Allow once · Always · Deny (with optional reason).
+class _ApprovalCard extends StatelessWidget {
+  const _ApprovalCard({
+    required this.approval,
+    required this.onDecide,
+    required this.onAlwaysAllow,
+  });
+
+  final PendingApproval approval;
+  final void Function(bool allow, String? reason) onDecide;
+  final VoidCallback onAlwaysAllow;
+
+  Future<void> _deny(BuildContext context) async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Deny tool'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Reason (optional)',
+            hintText: 'Why, or what to do instead',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Deny')),
+        ],
+      ),
+    );
+    if (confirmed ?? false) {
+      onDecide(false, controller.text.trim());
+    }
+    controller.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.colors.primary.withValues(alpha: 0.08),
+        border: Border.all(color: context.colors.primary),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lock_outline, size: 16, color: context.colors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Allow ${approval.toolName}?',
+                    style: context.text.semibold16),
+              ),
+            ],
+          ),
+          if (approval.summary.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              approval.summary,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: context.text.regular12.copyWith(
+                fontFamily: 'monospace',
+                color: context.colors.onSurface,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton(
+                onPressed: () => onDecide(true, null),
+                child: const Text('Allow once'),
+              ),
+              OutlinedButton(
+                onPressed: onAlwaysAllow,
+                child: const Text('Always'),
+              ),
+              TextButton(
+                onPressed: () => _deny(context),
+                style:
+                    TextButton.styleFrom(foregroundColor: context.colors.red),
+                child: const Text('Deny'),
+              ),
+            ],
+          ),
         ],
       ),
     );

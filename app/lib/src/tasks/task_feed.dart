@@ -74,7 +74,35 @@ List<FeedItem> mapEventToItems(int seq, String type, dynamic payload) {
       return [
         FeedItem(seq: seq, kind: FeedKind.error, title: 'Error', body: msg)
       ];
+    case 'agent.permission_request':
+      final tool = payload is Map ? payload['toolName'] : null;
+      return [
+        FeedItem(
+            seq: seq,
+            kind: FeedKind.info,
+            title: 'Permission requested · $tool')
+      ];
+    case 'agent.permission_decision':
+      final d = payload is Map ? payload['decision'] : null;
+      return [
+        FeedItem(seq: seq, kind: FeedKind.lifecycle, title: 'Permission $d')
+      ];
+    case 'agent.permission_timeout':
+      return [
+        FeedItem(
+            seq: seq,
+            kind: FeedKind.error,
+            title: 'Permission timed out (auto-denied)')
+      ];
+    case 'agent.permission_auto_denied':
+      final tool = payload is Map ? payload['toolName'] : null;
+      final why = payload is Map ? payload['reason']?.toString() : null;
+      return [
+        FeedItem(
+            seq: seq, kind: FeedKind.error, title: 'Blocked · $tool', body: why)
+      ];
     default:
+      // agent.permission_auto_allowed and others are intentionally not shown (noise).
       return const [];
   }
 }

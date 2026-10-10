@@ -20,7 +20,7 @@
 | Pairing (S1-08: QR scan → token) | ✅ works — phone paired & connected to the daemon (2026-10-09, user-confirmed) |
 | Project list / new task (S1-09) | ✅ implemented — tap active project → prompt → `POST /projects/:id/tasks` |
 | Task stream screen (S1-10) | ✅ implemented — `WS …/stream?since=<seq>`, replay + reconnect, tool-call cards, Stop button |
-| Approvals UI (S2-04) | ⬜ not started |
+| Approvals UI (S2-04) | ✅ done — approval cards (Allow once / Always / Deny+reason) in the task stream |
 | Diff review + code viewer (S2-07, S2-08) | ⬜ not started |
 | Builds screen + biometric gate (S3-06, S3-07) | ⬜ not started |
 
@@ -36,7 +36,7 @@
 - [x] **S1-08** Flutter shell: Riverpod, **AutoRoute**, secure storage, pairing screen (QR scan) — pairing confirmed live 2026-10-09
 - [x] **S1-09** Project list + "new task" screen
 - [x] **S1-10** Task stream screen (text + tool-call cards, stop button; reconnect replays via `since=<seq>`)
-- [ ] **S2-04** Approval cards (Allow once / Always / Deny with reason)
+- [x] **S2-04** Approval cards (Allow once / Always / Deny with reason)
 - [ ] **S2-07** Review screen (file list, +/- counts, unified/stacked diff; smooth on large diffs)
 - [ ] **S2-08** Code viewer with syntax highlighting (chunked for large files)
 - [ ] **S3-06** Builds screen (group picker, notes editor, progress, Firebase link)
@@ -75,6 +75,23 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S2-04 approval cards
+- Approval cards render in the task stream for parked tool calls, derived from the WS event
+  fold (`agent.permission_request` adds; `agent.permission_decision`/`_timeout` removes) in
+  `task_stream.dart` → `TaskStreamState.pending`. On a fresh open (`since=0`) the fold rebuilds
+  the pending set, so reconnect/relaunch shows the right cards.
+- Buttons: **Allow once** → POST decision `allow`; **Deny** → dialog for optional reason →
+  `deny`; **Always** → client-side session auto-allow for that tool name (approves current +
+  future requests automatically this session). New files: `models/pending_approval.dart`;
+  card UI `_ApprovalCard` in `task_page.dart`; feed now shows permission request/decision/
+  timeout/auto-denied (auto-allowed hidden as noise).
+- **Decisions reach the daemon** via `POST /tasks/:id/permissions/:toolUseId` (the S2-01
+  endpoint); the agent then resumes.
+- **Tested:** `analyze` clean, `flutter test` 14/14 (feed mapping + PendingApproval.summary).
+- **Notes / deferred:** "Always" is per-session client-side (no persisted daemon rule) and is
+  **not yet biometric-gated** — CLAUDE.md wants a biometric check on "always allow"; that's
+  **S3-07**. Needs the daemon running S2-01/02/03 (agent Mac) to exercise end-to-end.
 
 ### 2026-10-10 — logging interceptor + app-scoped launch config
 - Added a colorized Dio **logging interceptor** mirroring hedged: `core/extension/log.dart`

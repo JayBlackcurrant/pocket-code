@@ -40,4 +40,23 @@ void main() {
   test('unknown event yields no items', () {
     expect(mapEventToItems(1, 'agent.system.init', {}), isEmpty);
   });
+
+  test('permission events map to feed items', () {
+    expect(
+      mapEventToItems(1, 'agent.permission_request', {'toolName': 'Bash'}).single.title,
+      contains('Bash'),
+    );
+    expect(
+      mapEventToItems(2, 'agent.permission_decision', {'decision': 'allowed'}).single.title,
+      contains('allowed'),
+    );
+    expect(
+      mapEventToItems(3, 'agent.permission_auto_denied', {'toolName': 'Bash', 'reason': 'nope'})
+          .single
+          .kind,
+      FeedKind.error,
+    );
+    // auto_allowed is intentionally not shown (noise).
+    expect(mapEventToItems(4, 'agent.permission_auto_allowed', {'toolName': 'Read'}), isEmpty);
+  });
 }
