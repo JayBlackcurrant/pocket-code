@@ -79,35 +79,61 @@ export function tokenizeCommand(command: string): { cmd: string; args: string[] 
   return { cmd: parts[0]!, args: parts.slice(1) };
 }
 
-/** Default step runner: spawn without a shell, buffer stdout/stderr into whole lines.
- *  Shared by the build pipeline (S3-01) and the upload step (S3-02). */
-export const spawnRunStep: RunStep = ({ command, argv, cwd, signal, onLine }) => {
-  const { cmd, args } = argv ?? tokenizeCommand(command);
-  return new Promise<StepResult>((resolvePromise, reject) => {
-    const child = spawn(cmd, args, { cwd, signal });
-    const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
+/**
+ * Prefix a command with `caffeinate -i` so a long job (a 15-minute build) can't let the
+ * Mac idle-sleep mid-run (S3-08, CLAUDE.md). Only on macOS — `caffeinate` is macOS-only;
+ * elsewhere (and when disabled) the command is returned unchanged. Pure + testable via the
+ * injectable `platform`.
+ */
+export function caffeinateWrap(
+  cmd: string,
+  args: string[],
+  opts: { enabled: boolean; platform?: NodeJS.Platform },
+): { cmd: string; args: string[] } {
+  const platform = opts.platform ?? process.platform;
+  if (opts.enabled && platform === 'darwin') {
+    return { cmd: 'caffeinate', args: ['-i', cmd, ...args] };
+  }
+  return { cmd, args };
+}
 
-    const pump = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
-      buffers[stream] += chunk.toString('utf8');
-      let nl = buffers[stream].indexOf('\n');
-      while (nl !== -1) {
-        onLine(stream, buffers[stream].slice(0, nl).replace(/\r$/, ''));
-        buffers[stream] = buffers[stream].slice(nl + 1);
-        nl = buffers[stream].indexOf('\n');
-      }
-    };
+/** Build a spawn-based step runner: no shell, stdout/stderr buffered into whole lines, and
+ *  (on macOS, unless disabled) the command wrapped in `caffeinate -i` so the Mac stays awake
+ *  for the whole job (S3-08). Shared by the build pipeline (S3-01) and upload step (S3-02). */
+export function makeSpawnRunStep(opts: { caffeinate?: boolean } = {}): RunStep {
+  const caffeinate = opts.caffeinate ?? true;
+  return ({ command, argv, cwd, signal, onLine }) => {
+    const base = argv ?? tokenizeCommand(command);
+    const { cmd, args } = caffeinateWrap(base.cmd, base.args, { enabled: caffeinate });
+    return new Promise<StepResult>((resolvePromise, reject) => {
+      const child = spawn(cmd, args, { cwd, signal });
+      const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
 
-    child.stdout?.on('data', pump('stdout'));
-    child.stderr?.on('data', pump('stderr'));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      for (const stream of ['stdout', 'stderr'] as const) {
-        if (buffers[stream].length > 0) onLine(stream, buffers[stream]);
-      }
-      resolvePromise({ code: code ?? 1 });
+      const pump = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
+        buffers[stream] += chunk.toString('utf8');
+        let nl = buffers[stream].indexOf('\n');
+        while (nl !== -1) {
+          onLine(stream, buffers[stream].slice(0, nl).replace(/\r$/, ''));
+          buffers[stream] = buffers[stream].slice(nl + 1);
+          nl = buffers[stream].indexOf('\n');
+        }
+      };
+
+      child.stdout?.on('data', pump('stdout'));
+      child.stderr?.on('data', pump('stderr'));
+      child.on('error', reject);
+      child.on('close', (code) => {
+        for (const stream of ['stdout', 'stderr'] as const) {
+          if (buffers[stream].length > 0) onLine(stream, buffers[stream]);
+        }
+        resolvePromise({ code: code ?? 1 });
+      });
     });
-  });
-};
+  };
+}
+
+/** Default step runner (caffeinate on). Used when a service is given no runStep. */
+export const spawnRunStep: RunStep = makeSpawnRunStep();
 
 /**
  * Build service (S3-01): a serial queue (one build at a time) that runs a project's

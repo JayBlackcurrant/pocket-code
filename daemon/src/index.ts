@@ -7,7 +7,7 @@ import { BuildStore } from './db/buildStore.js';
 import { BuildLog } from './db/buildLog.js';
 import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
-import { BuildService } from './build/buildService.js';
+import { BuildService, makeSpawnRunStep } from './build/buildService.js';
 import { DistributionService } from './build/distributionService.js';
 import { ReleaseNotesService } from './build/releaseNotes.js';
 import { ProjectRegistry } from './registry/projectRegistry.js';
@@ -32,8 +32,10 @@ async function main(): Promise<void> {
     approvalTimeoutMs: env.approvalTimeoutMs,
     ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
   });
-  const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks });
-  const distribution = new DistributionService({ registry, builds: buildStore, buildLog });
+  // Long jobs run under `caffeinate -i` so the Mac stays awake mid-build (S3-08).
+  const runStep = makeSpawnRunStep({ caffeinate: env.caffeinate });
+  const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks, runStep });
+  const distribution = new DistributionService({ registry, builds: buildStore, buildLog, runStep });
   const releaseNotes = new ReleaseNotesService({ registry, tasks, git });
 
   const app = await buildServer({

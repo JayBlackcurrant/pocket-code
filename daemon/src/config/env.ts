@@ -24,6 +24,9 @@ const EnvSchema = z.object({
   RELAYD_SANDBOX: z.enum(['on', 'off']).default('on'),
   // Auto-deny a pending phone approval after this many minutes so runs never hang (S2-03).
   RELAYD_APPROVAL_TIMEOUT_MINUTES: z.coerce.number().min(0).default(120),
+  // Wrap long build/upload jobs in `caffeinate -i` so the Mac doesn't idle-sleep mid-build
+  // (S3-08). macOS only; no-op elsewhere. Set "off" to disable.
+  RELAYD_CAFFEINATE: z.enum(['on', 'off']).default('on'),
 });
 
 export type DaemonEnv = {
@@ -36,6 +39,7 @@ export type DaemonEnv = {
   advertiseUrl: string;
   sandboxEnabled: boolean;
   approvalTimeoutMs: number;
+  caffeinate: boolean;
 };
 
 /** Hosts that would expose the daemon publicly. Binding to these is refused. */
@@ -64,5 +68,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): DaemonEnv {
     advertiseUrl: parsed.RELAYD_ADVERTISE_URL ?? `http://${parsed.RELAYD_HOST}:${parsed.RELAYD_PORT}`,
     sandboxEnabled: parsed.RELAYD_SANDBOX === 'on',
     approvalTimeoutMs: parsed.RELAYD_APPROVAL_TIMEOUT_MINUTES * 60_000,
+    caffeinate: parsed.RELAYD_CAFFEINATE === 'on',
   };
 }

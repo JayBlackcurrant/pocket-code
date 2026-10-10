@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — S3-01 build + S3-02 upload + S3-03 notes + S3-04 states/retry built on the dev machine (serial build queue + live log stream + distribute + AI notes + failure tail/retry); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
+**Last updated:** 2026-10-10 — S3-01/02/03/04 + S3-08 built on the dev machine (build queue + live log + distribute + AI notes + failure tail/retry + caffeinate); earlier: Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4)
 
 ---
 
@@ -18,7 +18,7 @@
 |------|-------|
 | Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
 | Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
-| Daemon Sprint 3 (S3-01/02/03/04) | 🟡 **built on dev machine** (typecheck clean, 138 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised |
+| Daemon Sprint 3 (S3-01/02/03/04/08) | 🟡 **built on dev machine** (typecheck clean, 142 tests) — not yet pulled/run here; no real `flutter build` / Firebase upload / live session resume exercised. S3-05 (FCM) still to do. |
 | Firebase App Distribution (hedged staging) | ⬜ **not provisioned** — manifest `appId`/`groups` are still `<placeholders>`; upload refuses until a real staging app id + tester group + service-account creds exist |
 | Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
 | Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
@@ -70,6 +70,21 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S3-08 caffeinate wrapper for long jobs — built on the dev machine
+- Build **and** upload steps now run under **`caffeinate -i`** so the Mac can't idle-sleep
+  during a 15-minute build (S3-08, CLAUDE.md). Implemented in the spawn runner:
+  `makeSpawnRunStep({caffeinate})` prefixes the command via pure `caffeinateWrap` (macOS only
+  — no-op on other platforms; `spawnRunStep` stays the caffeinated default). `index.ts` builds
+  one runStep from `env.caffeinate` and injects it into both BuildService + DistributionService.
+- Config: **`RELAYD_CAFFEINATE`** (on by default; `off` to disable) in `env.ts` + `.env.example`.
+- **Tested:** typecheck clean, **142/142** (4 new: wrap on darwin / unchanged on non-darwin /
+  unchanged when disabled, **+ a real spawn** that runs `caffeinate -i echo …` and streams the
+  output — exercises the actual runner on this Mac). No separate wrapper process to manage; the
+  job *is* the caffeinate child, so sleep is prevented exactly for the job's lifetime.
+- **➡️ Action on this Mac:** `git pull` + restart — builds will then hold the Mac awake on their
+  own (you can drop the outer `caffeinate` around `npm run dev` if it was only there for builds;
+  keep it if you also want the daemon itself to survive idle between jobs).
 
 ### 2026-10-10 — S3-04 build states + failure handling + retry — built on the dev machine
 - **Failed build now shows reason + last log lines.** `GET /builds/:id?tail=N` (default 20,

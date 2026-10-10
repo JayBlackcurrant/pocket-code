@@ -8,7 +8,13 @@ import { openDb, type Db } from '../db/db.js';
 import { BuildStore } from '../db/buildStore.js';
 import { BuildLog, type StoredBuildEvent } from '../db/buildLog.js';
 import { TaskStore } from '../db/taskStore.js';
-import { BuildService, tokenizeCommand, type RunStep } from './buildService.js';
+import {
+  BuildService,
+  caffeinateWrap,
+  makeSpawnRunStep,
+  tokenizeCommand,
+  type RunStep,
+} from './buildService.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,6 +87,41 @@ describe('tokenizeCommand', () => {
 
   it('throws on an empty command', () => {
     expect(() => tokenizeCommand('   ')).toThrow();
+  });
+});
+
+describe('caffeinateWrap (S3-08)', () => {
+  it('wraps a command in `caffeinate -i` on macOS when enabled', () => {
+    const w = caffeinateWrap('fvm', ['flutter', 'build', 'apk'], {
+      enabled: true,
+      platform: 'darwin',
+    });
+    expect(w).toEqual({ cmd: 'caffeinate', args: ['-i', 'fvm', 'flutter', 'build', 'apk'] });
+  });
+
+  it('leaves the command unchanged on non-macOS', () => {
+    const w = caffeinateWrap('fvm', ['build'], { enabled: true, platform: 'linux' });
+    expect(w).toEqual({ cmd: 'fvm', args: ['build'] });
+  });
+
+  it('leaves the command unchanged when disabled', () => {
+    const w = caffeinateWrap('fvm', ['build'], { enabled: false, platform: 'darwin' });
+    expect(w).toEqual({ cmd: 'fvm', args: ['build'] });
+  });
+});
+
+describe('makeSpawnRunStep (S3-08)', () => {
+  it('runs a real command and streams its output (under caffeinate on macOS)', async () => {
+    const run = makeSpawnRunStep({ caffeinate: true });
+    const lines: string[] = [];
+    const result = await run({
+      command: 'echo pocketcode-s3-08',
+      cwd: repo,
+      signal: new AbortController().signal,
+      onLine: (_stream, line) => lines.push(line),
+    });
+    expect(result.code).toBe(0);
+    expect(lines.join('\n')).toContain('pocketcode-s3-08');
   });
 });
 
