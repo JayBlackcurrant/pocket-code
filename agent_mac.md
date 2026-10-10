@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — S2-01 daemon code added from the dev machine (needs pull+restart here)
+**Last updated:** 2026-10-10 — Sprint 2 reviewed & running here; agent SDK upgraded (0.1.77→0.3.296, zod 3→4) to fix a live 400; runner logging added
 
 ---
 
@@ -16,19 +16,17 @@
 
 | Area | State |
 |------|-------|
-| Daemon code (Sprint 1: S1-01…S1-07) | ✅ present & passing |
-| Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Approval timeout (S2-03) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Diff endpoints (S2-05) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| File reader (S2-06) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Git actions (S2-09 daemon) | ✅ code done (dev machine) — **needs `git pull` + restart here** (97/97 tests) |
+| Daemon Sprint 1 (S1-01…S1-07) | ✅ present & passing |
+| Daemon Sprint 2 (S2-01/02/03/05/06/09) | ✅ pulled & running here; typecheck clean, **97/97 tests** |
+| Agent SDK version | ✅ **0.3.296** (upgraded from 0.1.77; required zod 3→4) — fixes the duplicate-`tool_use`-id 400 |
+| Runner error logging | ✅ added — `agent run returned an error result` / `task failed` → daemon log |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
-| Device pairing | ✅ phone paired & connected end-to-end (2026-10-09) |
+| Device pairing | ✅ paired & connected; re-paired 2026-10-10 after restarts |
+| Live agent task (end-to-end) | 🟡 first run hit a 400 (SDK bug); re-testing after the SDK upgrade |
 | Always-on service (S4-01 LaunchAgent) | ⬜ **not set up** — runs under `caffeinate` only; no reboot survival |
-| Daemon currently running? | ⚠️ **no** — last background run was stopped; restart when needed (see Runbook) |
+| Daemon currently running? | ✅ **yes** — background under `caffeinate`, fresh with SDK 0.3.296 |
 
 ---
 
@@ -59,14 +57,40 @@ tailscale serve status
 
 ## Next up (Mac / daemon side)
 
-- [ ] **S4-01** — LaunchAgent plist with `KeepAlive` for real reboot/crash survival (deferred; user chose "leave as-is for now" on 2026-10-09).
-- [ ] Confirm task worktrees land somewhere sensible (`RELAYD_WORKSPACES_DIR` is unset; verify first real task run creates a worktree inside the allowlist).
-- [ ] Commit the `daemon/.gitignore` change (added `env.sh`) on a `claude/` branch — currently uncommitted on `main`.
-- [ ] `npm audit` reported 6 vulns (3 moderate / 1 high / 2 critical) in deps — triage before hardening sprint (don't `--force` blindly).
+- [x] Daemon SDK upgrade + zod 4 + runner logging — **committed by the user as `3e0a721` on `main` and pushed** (dev side can pull). *(Landed directly on `main`, not a `claude/` branch.)*
+- [ ] **Re-verify a live agent task** from the phone now that the SDK is upgraded (the earlier 400 should be gone).
+- [ ] **S4-01** — LaunchAgent plist with `KeepAlive` for real reboot/crash survival (deferred; user chose "leave as-is for now" on 2026-10-09). Keeps biting pairing: when the daemon is stopped/rebooted nothing restarts it.
+- [ ] Confirm task worktrees land somewhere sensible (`RELAYD_WORKSPACES_DIR` is unset; verify a real task run creates a worktree inside the allowlist).
+- [ ] **S4-05 hardening:** `permissionRules` `git push` deny regex misses `git -C <path> push` — tighten it.
+- [ ] Confirm **S2-04 "Always allow"** behavior — no server-side rule persistence yet; check whether it re-asks on the next identical tool.
+- [ ] `npm audit`: 6 vulns (3 moderate / 1 high / 2 critical) — triage before the hardening sprint (don't `--force` blindly).
 
 ---
 
 ## Log
+
+### 2026-10-10 — pulled Sprint 2, debugged a live 400, upgraded the agent SDK (on this Mac)
+Reviewed all of Sprint 2 here, then debugged the first live run and upgraded the SDK:
+- **Sprint 2 review:** at HEAD (`main` == `origin/main`); typecheck clean, **97/97 tests**. Verified
+  the security-sensitive bits I run: sandbox on by default, `canUseTool` deny/allow/ask wiring,
+  push triple-guarded (`branchBlockedReason` + `claude/*`-only + Bash `git push` deny), `execFile`
+  (no shell), path-safe file/diff/revert. Flags: push regex bypass via `git -C`; no server-side
+  "always allow" persistence; parked approvals don't survive a daemon restart (S4-02 territory).
+- **Live 400 debugged:** first real task from the phone failed; the app showed "claude return 400".
+  Root cause (from the event log, not the console — which logged nothing): `400
+  invalid_request_error — "tool_use ids must be unique"`, the bundled Claude Code (2.0.77) emitting
+  duplicate tool_use ids under parallel tool calls. Not our code — the SDK builds those messages.
+- **Added runner logging** (`agentRunner.ts` + `index.ts`): `agent run returned an error result`
+  (logs the API error text + `request_id`), `task failed`, and `task started`/`task completed`
+  info lines, routed through fastify's pino logger. Future failures now show in the daemon log.
+- **Upgraded the agent SDK 0.1.77 → 0.3.296** (user approved). Forced peer bump **zod 3 → 4**;
+  migrated (vanilla usage; the one `.url()` still compiles). Typecheck clean, **97/97 tests**.
+  Restarted the daemon fresh (in-place `npm install` doesn't reload a running process); healthy on
+  local + Tailscale paths; minted a fresh pairing QR for re-test.
+- **Committed by the user as `3e0a721`** on `main` (SDK upgrade + zod 4 + runner logging) and
+  pushed to origin — the dev side can pull it. (Landed on `main`, not a `claude/` branch.)
+- **Tested:** typecheck, 97 tests, `/healthz` (local + HTTPS). **Not yet verified:** a clean live
+  agent task end-to-end after the upgrade (awaiting the phone re-test).
 
 ### 2026-10-10 — S2-09 git actions (daemon) — built on the dev machine
 - `GitService`: `commitAll` (stage+commit, "nothing to commit" via `status --porcelain`),
