@@ -1,10 +1,30 @@
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { safeResolveWithin } from '../fs/pathSafety.js';
 
 const execFileAsync = promisify(execFile);
+
+/** Caps so a huge diff can't blow up the daemon or the phone (S2-05). */
+export const DIFF_MAX_BYTES = 512 * 1024;
+export const DIFF_MAX_LINES = 5000;
+
+export interface DiffFileSummary {
+  path: string;
+  oldPath?: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked';
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+export interface FileDiff {
+  path: string;
+  binary: boolean;
+  truncated: boolean;
+  patch: string | null; // null when binary
+}
 
 export class GitError extends Error {
   constructor(message: string) {
@@ -183,4 +203,143 @@ export class GitService {
       }
     }
   }
+
+  /** Run a git diff command, tolerating exit code 1 (= differences found). */
+  private async gitDiff(repoPath: string, args: string[]): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+        maxBuffer: 32 * 1024 * 1024,
+      });
+      return stdout;
+    } catch (e) {
+      const err = e as { code?: number; stdout?: string; stderr?: string; message: string };
+      if (err.code === 1 && typeof err.stdout === 'string') return err.stdout;
+      throw new GitError(`git ${args.join(' ')} failed: ${(err.stderr || err.message).trim()}`);
+    }
+  }
+
+  /**
+   * Changed files vs the base ref (S2-05): tracked changes from `git diff` plus untracked
+   * files, with rename detection, +/- counts, and binary flags.
+   */
+  async diffSummary(repoPath: string, baseRef: string): Promise<DiffFileSummary[]> {
+    const base = await this.resolveBaseRef(repoPath, baseRef);
+    const files = new Map<string, DiffFileSummary>();
+
+    // Status + paths (authoritative; carries rename old/new).
+    const nameStatus = await this.gitDiff(repoPath, ['diff', '--name-status', '-M', base]);
+    for (const line of nameStatus.split('\n')) {
+      if (line.trim() === '') continue;
+      const parts = line.split('\t');
+      const code = parts[0] ?? '';
+      if (code.startsWith('R') || code.startsWith('C')) {
+        const oldPath = parts[1] ?? '';
+        const path = parts[2] ?? '';
+        files.set(path, {
+          path,
+          oldPath,
+          status: code.startsWith('R') ? 'renamed' : 'copied',
+          additions: 0,
+          deletions: 0,
+          binary: false,
+        });
+      } else {
+        const path = parts[1] ?? '';
+        files.set(path, { path, status: statusFromCode(code), additions: 0, deletions: 0, binary: false });
+      }
+    }
+
+    // Line counts (keyed by the new path).
+    const numstat = await this.gitDiff(repoPath, ['diff', '--numstat', '-M', base]);
+    for (const line of numstat.split('\n')) {
+      if (line.trim() === '') continue;
+      const [addRaw, delRaw, ...rest] = line.split('\t');
+      const path = numstatNewPath(rest.join('\t'));
+      const entry = files.get(path);
+      if (!entry) continue;
+      if (addRaw === '-' || delRaw === '-') {
+        entry.binary = true;
+      } else {
+        entry.additions = Number(addRaw) || 0;
+        entry.deletions = Number(delRaw) || 0;
+      }
+    }
+
+    // Untracked files (not shown by `git diff`).
+    const untracked = await this.git(repoPath, ['ls-files', '--others', '--exclude-standard']);
+    for (const path of untracked.split('\n')) {
+      if (path.trim() === '' || files.has(path)) continue;
+      const stat = await this.gitDiff(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', path]);
+      const cols = stat.split('\n')[0]?.split('\t') ?? [];
+      const binary = cols[0] === '-' || cols[1] === '-';
+      files.set(path, {
+        path,
+        status: 'untracked',
+        additions: binary ? 0 : Number(cols[0]) || 0,
+        deletions: 0,
+        binary,
+      });
+    }
+
+    return [...files.values()].sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /** Unified patch for one changed file vs base (S2-05), size-capped. */
+  async diffFile(
+    repoPath: string,
+    baseRef: string,
+    relPath: string,
+    opts: { maxBytes?: number; maxLines?: number } = {},
+  ): Promise<FileDiff> {
+    const { maxBytes = DIFF_MAX_BYTES, maxLines = DIFF_MAX_LINES } = opts;
+    const abs = safeResolveWithin(repoPath, relPath); // blocks traversal/symlink escape
+    const rel = relative(repoPath, abs);
+    const base = await this.resolveBaseRef(repoPath, baseRef);
+
+    const isUntracked =
+      (await this.git(repoPath, ['ls-files', '--others', '--exclude-standard', '--', rel])).trim() !== '';
+    const patch = isUntracked
+      ? await this.gitDiff(repoPath, ['diff', '-U3', '--no-index', '--', '/dev/null', rel])
+      : await this.gitDiff(repoPath, ['diff', '-U3', '-M', base, '--', rel]);
+
+    if (/^Binary files /m.test(patch)) {
+      return { path: rel, binary: true, truncated: false, patch: null };
+    }
+
+    let out = patch;
+    let truncated = false;
+    const lines = out.split('\n');
+    if (lines.length > maxLines) {
+      out = lines.slice(0, maxLines).join('\n');
+      truncated = true;
+    }
+    if (out.length > maxBytes) {
+      out = out.slice(0, maxBytes);
+      truncated = true;
+    }
+    return { path: rel, binary: false, truncated, patch: out };
+  }
+}
+
+function statusFromCode(code: string): DiffFileSummary['status'] {
+  switch (code[0]) {
+    case 'A':
+      return 'added';
+    case 'D':
+      return 'deleted';
+    case 'M':
+    default:
+      return 'modified';
+  }
+}
+
+/** Extract the new path from a numstat path field, handling rename forms. */
+function numstatNewPath(field: string): string {
+  if (!field.includes('=>')) return field;
+  const collapsed = field.replace(/\{[^}]*=> ([^}]*)\}/g, '$1');
+  if (collapsed.includes('=>')) {
+    const parts = collapsed.split('=>');
+    return (parts[parts.length - 1] ?? '').trim();
+  }
+  return collapsed.trim();
 }

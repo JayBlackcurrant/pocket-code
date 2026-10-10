@@ -16,6 +16,7 @@ import type { ProjectRegistry, RegisteredProject } from './registry/projectRegis
 import type { AgentRunner } from './agent/agentRunner.js';
 import type { TaskStore } from './db/taskStore.js';
 import type { EventLog, StoredEvent } from './db/eventLog.js';
+import { GitError, type GitService } from './git/gitService.js';
 
 export interface ServerDeps {
   env: DaemonEnv;
@@ -24,6 +25,7 @@ export interface ServerDeps {
   runner: AgentRunner;
   tasks: TaskStore;
   events: EventLog;
+  git: GitService;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */
@@ -66,6 +68,13 @@ const DecisionBody = z.object({
   reason: z.string().max(2000).optional(),
   input: z.record(z.string(), z.unknown()).optional(),
 });
+
+const DiffQuery = z.object({ path: z.string().min(1) });
+
+/** Base ref to diff a task against: its project's manifest git.base. */
+function taskBaseRef(deps: ServerDeps, projectId: string): string | undefined {
+  return deps.registry.get(projectId)?.manifest.git.base;
+}
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
@@ -175,6 +184,44 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const q = EventsQuery.safeParse(req.query);
       if (!q.success) return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
       return { events: deps.events.since(req.params.id, q.data.since) };
+    },
+  );
+
+  // Changed-files summary for a task's worktree vs the project base (S2-05).
+  app.get<{ Params: { id: string } }>('/tasks/:id/diff/summary', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+    const base = taskBaseRef(deps, task.projectId);
+    if (!base) return reply.code(409).send({ error: 'unknown project base' });
+    try {
+      const files = await deps.git.diffSummary(task.worktree, base);
+      return { base, files };
+    } catch (err) {
+      if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // One file's unified patch (S2-05), size-capped.
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/tasks/:id/diff',
+    auth,
+    async (req, reply) => {
+      const task = deps.tasks.get(req.params.id);
+      if (!task) return reply.code(404).send({ error: 'unknown task' });
+      if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
+      const q = DiffQuery.safeParse(req.query);
+      if (!q.success) return reply.code(400).send({ error: 'path is required' });
+      const base = taskBaseRef(deps, task.projectId);
+      if (!base) return reply.code(409).send({ error: 'unknown project base' });
+      try {
+        return await deps.git.diffFile(task.worktree, base, q.data.path);
+      } catch (err) {
+        if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
+        if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+        throw err;
+      }
     },
   );
 

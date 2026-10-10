@@ -15,9 +15,10 @@ async function main(): Promise<void> {
   const db = openDb(env.dbPath);
   const tasks = new TaskStore(db);
   const events = new EventLog(db);
+  const git = new GitService();
   const runner = new AgentRunner({
     registry,
-    git: new GitService(),
+    git,
     tasks,
     events,
     db,
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
     ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
   });
 
-  const app = await buildServer({ env, registry, db, runner, tasks, events });
+  const app = await buildServer({ env, registry, db, runner, tasks, events, git });
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');

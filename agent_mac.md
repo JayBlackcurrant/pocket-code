@@ -19,7 +19,8 @@
 | Daemon code (Sprint 1: S1-01…S1-07) | ✅ present & passing |
 | Approvals bridge (S2-01 `canUseTool`) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
 | Permission rules + sandbox (S2-02) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
-| Approval timeout (S2-03) | ✅ code done (dev machine) — **needs `git pull` + restart here** (79/79 tests) |
+| Approval timeout (S2-03) | ✅ code done (dev machine) — **needs `git pull` + restart here** |
+| Diff endpoints (S2-05) | ✅ code done (dev machine) — **needs `git pull` + restart here** (85/85 tests) |
 | Mac setup (clean clone → running) | ✅ done per `AGENT_MAC_SETUP.md` |
 | `hedged` project resolution | ✅ `active` (`/healthz` → `{"ok":true,"projects":1}`) |
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
@@ -64,6 +65,18 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-10 — S2-05 diff endpoints — built on the dev machine
+- `GitService.diffSummary` / `diffFile` (in `src/git/gitService.ts`): changed files vs the
+  project base (manifest `git.base`), with rename detection, +/- counts, untracked files, and
+  binary flags; per-file unified patch (`-U3`) with size caps (`DIFF_MAX_LINES=5000`,
+  `DIFF_MAX_BYTES=512KB`, `truncated` flag). Uses a diff-tolerant git runner (exit code 1 =
+  differences, not an error).
+- New endpoints: `GET /tasks/:id/diff/summary` → `{ base, files[] }`; `GET /tasks/:id/diff?path=`
+  → `{ path, binary, truncated, patch }`. Path is validated against the worktree (403 on escape).
+- **Tested:** 85/85 (6 new git diff tests incl. the **3000-line file handled without crash**
+  acceptance, truncation, untracked, binary, rename, and path-escape rejection).
+- **➡️ Action on this Mac:** `git pull` + restart (no new env needed). App review screens are S2-07/08.
 
 ### 2026-10-10 — S2-03 approval timeout — built on the dev machine
 - A parked permission now auto-denies after a timeout (default **120 min**, env

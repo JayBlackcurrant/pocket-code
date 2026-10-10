@@ -83,7 +83,7 @@ async function rebuildWith(query: QueryFn): Promise<string> {
   await app.close();
   const tasks = new TaskStore(db);
   runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query });
-  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events });
+  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
   port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -181,7 +181,7 @@ beforeEach(async () => {
   const tasks = new TaskStore(db);
   events = new EventLog(db);
   runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: delayedQuery([], 0) });
-  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events });
+  app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const addr = app.server.address();
   port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -208,7 +208,7 @@ describe('WS /tasks/:id/stream', () => {
     // rebuild server with this runner
     await app.close();
     const tasks = new TaskStore(db);
-    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events });
+    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const addr = app.server.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -251,7 +251,7 @@ describe('WS /tasks/:id/stream', () => {
     });
     await app.close();
     const tasks = new TaskStore(db);
-    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events });
+    app = await buildServer({ env: loadEnv({}), registry, db, runner, tasks, events, git: new GitService() });
     await app.listen({ host: '127.0.0.1', port: 0 });
     const addr = app.server.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;
