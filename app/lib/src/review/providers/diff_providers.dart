@@ -3,6 +3,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/extension/future.dart';
 import '../../../core/instances/api_client.dart';
 import '../models/diff_file.dart';
+import '../models/file_content.dart';
 
 part 'diff_providers.g.dart';
 
@@ -22,4 +23,13 @@ Future<FileDiff> fileDiff(Ref ref, String taskId, String path) async {
   final res = await dio.get<dynamic>('/tasks/$taskId/diff',
       queryParameters: {'path': path}).guard();
   return FileDiff.fromJson(res.data as Map<String, dynamic>);
+}
+
+/// Full file contents (GET /tasks/:id/files?path=) for the code viewer.
+@riverpod
+Future<FileContent> fileContent(Ref ref, String taskId, String path) async {
+  final dio = ref.watch(apiProvider);
+  final res = await dio.get<dynamic>('/tasks/$taskId/files',
+      queryParameters: {'path': path}).guard();
+  return FileContent.fromJson(res.data as Map<String, dynamic>);
 }

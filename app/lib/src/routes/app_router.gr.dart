@@ -11,6 +11,64 @@
 part of 'app_router.dart';
 
 /// generated route for
+/// [CodeViewerPage]
+class CodeViewerRoute extends PageRouteInfo<CodeViewerRouteArgs> {
+  CodeViewerRoute({
+    required String taskId,
+    required String path,
+    Key? key,
+    List<PageRouteInfo>? children,
+  }) : super(
+          CodeViewerRoute.name,
+          args: CodeViewerRouteArgs(taskId: taskId, path: path, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'CodeViewerRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<CodeViewerRouteArgs>();
+      return CodeViewerPage(
+        taskId: args.taskId,
+        path: args.path,
+        key: args.key,
+      );
+    },
+  );
+}
+
+class CodeViewerRouteArgs {
+  const CodeViewerRouteArgs({
+    required this.taskId,
+    required this.path,
+    this.key,
+  });
+
+  final String taskId;
+
+  final String path;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'CodeViewerRouteArgs{taskId: $taskId, path: $path, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! CodeViewerRouteArgs) return false;
+    return taskId == other.taskId && path == other.path && key == other.key;
+  }
+
+  @override
+  int get hashCode => taskId.hashCode ^ path.hashCode ^ key.hashCode;
+}
+
+/// generated route for
 /// [DiffFilePage]
 class DiffFileRoute extends PageRouteInfo<DiffFileRouteArgs> {
   DiffFileRoute({

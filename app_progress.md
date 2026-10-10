@@ -22,7 +22,7 @@
 | Task stream screen (S1-10) | ✅ implemented — `WS …/stream?since=<seq>`, replay + reconnect, tool-call cards, Stop button |
 | Approvals UI (S2-04) | ✅ done — approval cards (Allow once / Always / Deny+reason) in the task stream |
 | Diff review (S2-07) | ✅ done — file list (+/- counts, generated collapsed) → per-file unified diff |
-| Code viewer (S2-08) | ⬜ not started |
+| Code viewer (S2-08) | ✅ done — full-file viewer, Dart/YAML syntax highlighting, line numbers |
 | Builds screen + biometric gate (S3-06, S3-07) | ⬜ not started |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
@@ -39,7 +39,7 @@
 - [x] **S1-10** Task stream screen (text + tool-call cards, stop button; reconnect replays via `since=<seq>`)
 - [x] **S2-04** Approval cards (Allow once / Always / Deny with reason)
 - [x] **S2-07** Review screen (file list, +/- counts, unified diff; smooth on large diffs)
-- [ ] **S2-08** Code viewer with syntax highlighting (chunked for large files)
+- [x] **S2-08** Code viewer with syntax highlighting (chunked for large files)
 - [ ] **S3-06** Builds screen (group picker, notes editor, progress, Firebase link)
 - [ ] **S3-07** Biometric gate (`local_auth`) for push / build / "always allow"
 
@@ -76,6 +76,19 @@
 ---
 
 ## Log
+
+### 2026-10-10 — S2-08 code viewer
+- `CodeViewerPage` (route `/tasks/:taskId/file`) reads full file content via S2-06
+  (`GET /tasks/:id/files?path=`, provider `fileContent`) and renders it with line numbers +
+  **syntax highlighting**. Highlighter (`src/review/highlighter.dart`) is a dependency-free
+  per-line tokenizer for **Dart** (keywords/types/strings/line+block comments with cross-line
+  carry/numbers) and **YAML** (keys/comments/strings/numbers/bools); other extensions render
+  plain. Spans are precomputed once, lines rendered via **`ListView.builder`** (chunked/smooth
+  for large files). Binary + truncated handled. Entry point: "View full file" action on the
+  per-file diff page.
+- Chose a custom highlighter over a dep (whole-file highlighters don't virtualize per line).
+- **Tested:** `analyze` clean, `flutter test` 20/20 (highlighter: dart kw/type/string/block
+  comment carry, yaml key/comment/number; language detection).
 
 ### 2026-10-10 — S2-07 diff review screen
 - New `src/review/` feature consuming S2-05 endpoints. `ReviewPage` (route

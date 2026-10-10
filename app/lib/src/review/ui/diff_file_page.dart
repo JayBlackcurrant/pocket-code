@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../../routes/app_router.dart';
 import '../diff_line.dart';
 import '../providers/diff_providers.dart';
 
@@ -19,7 +20,17 @@ class DiffFilePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final diff = ref.watch(fileDiffProvider(taskId, path));
     return Scaffold(
-      appBar: AppBar(title: Text(path.split('/').last)),
+      appBar: AppBar(
+        title: Text(path.split('/').last),
+        actions: [
+          IconButton(
+            tooltip: 'View full file',
+            icon: const Icon(Icons.description_outlined),
+            onPressed: () => context.router
+                .push(CodeViewerRoute(taskId: taskId, path: path)),
+          ),
+        ],
+      ),
       body: diff.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Padding(

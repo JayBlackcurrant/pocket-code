@@ -195,3 +195,105 @@ final class FileDiffFamily extends $Family
   @override
   String toString() => r'fileDiffProvider';
 }
+
+/// Full file contents (GET /tasks/:id/files?path=) for the code viewer.
+
+@ProviderFor(fileContent)
+const fileContentProvider = FileContentFamily._();
+
+/// Full file contents (GET /tasks/:id/files?path=) for the code viewer.
+
+final class FileContentProvider extends $FunctionalProvider<
+        AsyncValue<FileContent>, FileContent, FutureOr<FileContent>>
+    with $FutureModifier<FileContent>, $FutureProvider<FileContent> {
+  /// Full file contents (GET /tasks/:id/files?path=) for the code viewer.
+  const FileContentProvider._(
+      {required FileContentFamily super.from,
+      required (
+        String,
+        String,
+      )
+          super.argument})
+      : super(
+          retry: null,
+          name: r'fileContentProvider',
+          isAutoDispose: true,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$fileContentHash();
+
+  @override
+  String toString() {
+    return r'fileContentProvider'
+        ''
+        '$argument';
+  }
+
+  @$internal
+  @override
+  $FutureProviderElement<FileContent> $createElement(
+          $ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<FileContent> create(Ref ref) {
+    final argument = this.argument as (
+      String,
+      String,
+    );
+    return fileContent(
+      ref,
+      argument.$1,
+      argument.$2,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is FileContentProvider && other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$fileContentHash() => r'caa0ab9f36fd4132d1ac74d6e4a4d13655d1d7b0';
+
+/// Full file contents (GET /tasks/:id/files?path=) for the code viewer.
+
+final class FileContentFamily extends $Family
+    with
+        $FunctionalFamilyOverride<
+            FutureOr<FileContent>,
+            (
+              String,
+              String,
+            )> {
+  const FileContentFamily._()
+      : super(
+          retry: null,
+          name: r'fileContentProvider',
+          dependencies: null,
+          $allTransitiveDependencies: null,
+          isAutoDispose: true,
+        );
+
+  /// Full file contents (GET /tasks/:id/files?path=) for the code viewer.
+
+  FileContentProvider call(
+    String taskId,
+    String path,
+  ) =>
+      FileContentProvider._(argument: (
+        taskId,
+        path,
+      ), from: this);
+
+  @override
+  String toString() => r'fileContentProvider';
+}

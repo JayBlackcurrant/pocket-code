@@ -4,6 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../home/ui/home_page.dart';
 import '../pairing/ui/pairing_page.dart';
+import '../review/ui/code_viewer_page.dart';
 import '../review/ui/diff_file_page.dart';
 import '../review/ui/review_page.dart';
 import '../tasks/ui/new_task_page.dart';
@@ -53,6 +54,11 @@ class AppRouter extends RootStackRouter {
         AutoRoute(
           page: DiffFileRoute.page,
           path: '/tasks/:taskId/review/file',
+          guards: [PairingGuard(_ref)],
+        ),
+        AutoRoute(
+          page: CodeViewerRoute.page,
+          path: '/tasks/:taskId/file',
           guards: [PairingGuard(_ref)],
         ),
         AutoRoute(page: PairingRoute.page, path: '/pair'),
