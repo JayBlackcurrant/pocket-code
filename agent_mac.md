@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-10 — codegen steps can now run in a subdirectory (`dir:`) so hedged's `api/` build_runner runs before the app root; Firebase App Distribution replaced with a keyless **Tailscale-served APK link** (branch `claude/tailscale-distribution`, 163 tests); earlier: Sprint 3 daemon complete; SDK 0.1.77→0.3.296 (zod 3→4)
+**Last updated:** 2026-10-11 — **tasks now run in the project checkout on a `claude/<slug>` branch (no worktrees)**, one at a time per project, with edit-path containment (branch `claude/in-place-task-branches`, 166 tests) — fixes the staging signing failure; earlier: codegen `dir:` for api/; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -75,6 +75,27 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-11 — tasks run in the project dir on a per-task branch (worktrees dropped) — this Mac
+Branch `claude/in-place-task-branches` (`6916790`). Root cause of the staging build's
+*"StagSign missing storeFile"*: tasks ran in `.worktrees/<id>`, which hold only tracked files, so
+the gitignored `android/staging-key.properties` + keystores never reached them. Owner chose (over
+the copy-in alternative) to run tasks **in place** in the project checkout for long-term simplicity.
+- gitService: `createWorktree`→`createTaskBranch` (`checkout -b` in place, **requires a clean tree**),
+  `removeWorktree`→`discardTaskBranch` (`reset --hard` + `clean -fd` + `checkout base` + `branch -D`),
+  added `isClean`/`checkoutBranch`, removed worktreePath/ensureExcluded/listWorktrees.
+- agentRunner: **one active task per project** (`ProjectBusyError`→409) replaces worktree isolation;
+  **edit-path containment** in `canUseTool` denies Edit/Write/etc. whose path escapes the project dir.
+- server: discard → `discardTaskBranch`; `POST /projects/:id/tasks` → 409 when busy. Other endpoints
+  unchanged (a task's stored `worktree` is now just the project dir).
+- buildService: builds run in the project dir and `checkout` the task's branch first (builds the right code).
+- Docs updated: `CLAUDE.md` git rules, `PROJECT_DESCRIPTION.md` isolation + risk rows.
+- **Tested:** typecheck clean; **166 tests** (branch-based git service incl. clean-tree + discard,
+  one-at-a-time 409, edit-containment deny). **Not yet run live** on a real agent task/build — verify:
+  start a task → `hedged-core-app` goes onto `claude/<slug>`; build → **staging signing succeeds**;
+  discard → back to a clean `stag`; a 2nd concurrent task → 409.
+- **Follow-up / cleanup:** 11 stale `.worktrees/*` dirs + old `claude/*` branches remain in
+  `hedged-core-app` (one-time `git worktree remove` + `branch -D`). Branch not pushed.
 
 ### 2026-10-10 — codegen steps support a per-step working directory (`dir:`) — this Mac
 On branch `claude/tailscale-distribution` (`18d1075`). A codegen step can now be `{ run, dir }`,
