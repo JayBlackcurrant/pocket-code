@@ -12,7 +12,13 @@ import {
   revokeDevice,
 } from './auth/store.js';
 import { PathNotAllowedError } from './fs/pathSafety.js';
-import { readFileSafe, FileNotFoundError, NotAFileError } from './fs/fileReader.js';
+import {
+  readFileSafe,
+  listDir,
+  FileNotFoundError,
+  NotAFileError,
+  NotADirectoryError,
+} from './fs/fileReader.js';
 import type { ProjectRegistry, RegisteredProject } from './registry/projectRegistry.js';
 import type { AgentRunner } from './agent/agentRunner.js';
 import type { TaskStore } from './db/taskStore.js';
@@ -148,6 +154,44 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         return { project: project.manifest.id, flavor, apk, executed: false };
       } catch (err) {
         return reply.code(409).send({ error: (err as Error).message });
+      }
+    },
+  );
+
+  // Browse a project's files: list one directory (path-safe), folders expand on demand.
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/projects/:id/tree',
+    auth,
+    async (req, reply) => {
+      const project = deps.registry.getActive(req.params.id);
+      if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+      try {
+        return { entries: listDir(project.resolvedPath, req.query.path ?? '') };
+      } catch (err) {
+        if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
+        if (err instanceof FileNotFoundError) return reply.code(404).send({ error: err.message });
+        if (err instanceof NotADirectoryError) return reply.code(400).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  // Read one file from a project (path-safe), for the project browser.
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/projects/:id/files',
+    auth,
+    async (req, reply) => {
+      const project = deps.registry.getActive(req.params.id);
+      if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+      const q = DiffQuery.safeParse(req.query);
+      if (!q.success) return reply.code(400).send({ error: 'path is required' });
+      try {
+        return readFileSafe(project.resolvedPath, q.data.path);
+      } catch (err) {
+        if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
+        if (err instanceof FileNotFoundError) return reply.code(404).send({ error: err.message });
+        if (err instanceof NotAFileError) return reply.code(400).send({ error: err.message });
+        throw err;
       }
     },
   );

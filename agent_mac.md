@@ -69,6 +69,14 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-10 — Project browser endpoints — built on the dev machine
+- New project-scoped, path-safe endpoints for the app's project browser:
+  `GET /projects/:id/tree?path=` (one directory; dirs first; hides .git/node_modules/build/
+  .dart_tool/.fvm/etc.) and `GET /projects/:id/files?path=` (reuses `readFileSafe`). Both
+  require the project `active`. New `listDir` + `NotADirectoryError` in `fs/fileReader.ts`.
+- **Tested:** 99/99 (added listDir dir-first + non-directory cases).
+- **➡️ Action on this Mac:** `git pull` + restart to serve the new endpoints.
+
 ### 2026-10-10 — pulled Sprint 2, debugged a live 400, upgraded the agent SDK (on this Mac)
 Reviewed all of Sprint 2 here, then debugged the first live run and upgraded the SDK:
 - **Sprint 2 review:** at HEAD (`main` == `origin/main`); typecheck clean, **97/97 tests**. Verified

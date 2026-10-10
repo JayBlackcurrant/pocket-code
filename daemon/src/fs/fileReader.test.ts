@@ -6,6 +6,8 @@ import { PathNotAllowedError } from './pathSafety.js';
 import {
   FileNotFoundError,
   NotAFileError,
+  NotADirectoryError,
+  listDir,
   readFileSafe,
 } from './fileReader.js';
 
@@ -63,5 +65,18 @@ describe('readFileSafe', () => {
 
   it('throws NotAFileError for a directory', () => {
     expect(() => readFileSafe(root, 'lib')).toThrow(NotAFileError);
+  });
+});
+
+describe('listDir', () => {
+  it('lists directory contents with directories first', () => {
+    const entries = listDir(root, '');
+    expect(entries.map((e) => e.name)).toContain('lib');
+    expect(entries.map((e) => e.name)).toContain('blob.bin');
+    expect(entries[0]!.type).toBe('dir');
+  });
+
+  it('rejects a non-directory', () => {
+    expect(() => listDir(root, 'blob.bin')).toThrow(NotADirectoryError);
   });
 });

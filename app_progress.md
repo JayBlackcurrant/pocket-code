@@ -78,6 +78,23 @@
 
 ## Log
 
+### 2026-10-10 — Project browser + attach-files prompt (new UX)
+- Tapping a project now opens `ProjectPage` (route `/projects/:projectId/browse`) instead of
+  the old new-task screen: a **file browser** (directory navigator via `GET /projects/:id/tree`,
+  tap folder to descend, up button, tap file → `ProjectFilePage` read-only viewer) with a
+  **composer at the bottom** — multiline prompt + **Send**, and **attach files** (tap the + on a
+  file row → chips above the input). Send folds attachments into the prompt ("Please consider
+  these files: …") and starts the task via the existing `newTaskController`, then opens the task
+  stream.
+- New `src/project/` feature (tree_entry model, projectTree/projectFile providers, project_page,
+  project_file_page). Extracted a reusable `CodeView` widget (shared by the task code viewer and
+  the project file viewer). Removed the old `new_task_page.dart` (superseded); home points to
+  `ProjectRoute`.
+- Daemon side: `GET /projects/:id/tree` + `GET /projects/:id/files` (see agent_mac.md) — agent
+  Mac must pull+restart.
+- **Tested:** `analyze` clean, `flutter test` 20/20. The browser/compose flow isn't widget-tested
+  yet; verify on device.
+
 ### 2026-10-10 — S2-09 git actions (app)
 - Review screen app-bar menu: **Commit…** (dialog prefilled with the daemon's suggested
   message, editable), **Push branch** (confirm → `POST /push`), **Discard task** (confirm →

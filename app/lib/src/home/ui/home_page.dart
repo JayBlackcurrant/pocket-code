@@ -78,7 +78,7 @@ class HomePage extends ConsumerWidget {
                       enabled: active,
                       onTap: active
                           ? () => context.router.push(
-                                NewTaskRoute(
+                                ProjectRoute(
                                   projectId: p.id,
                                   projectName: p.displayName,
                                 ),

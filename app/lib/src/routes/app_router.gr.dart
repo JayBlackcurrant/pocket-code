@@ -135,70 +135,6 @@ class HomeRoute extends PageRouteInfo<void> {
 }
 
 /// generated route for
-/// [NewTaskPage]
-class NewTaskRoute extends PageRouteInfo<NewTaskRouteArgs> {
-  NewTaskRoute({
-    required String projectId,
-    required String projectName,
-    Key? key,
-    List<PageRouteInfo>? children,
-  }) : super(
-          NewTaskRoute.name,
-          args: NewTaskRouteArgs(
-            projectId: projectId,
-            projectName: projectName,
-            key: key,
-          ),
-          initialChildren: children,
-        );
-
-  static const String name = 'NewTaskRoute';
-
-  static PageInfo page = PageInfo(
-    name,
-    builder: (data) {
-      final args = data.argsAs<NewTaskRouteArgs>();
-      return NewTaskPage(
-        projectId: args.projectId,
-        projectName: args.projectName,
-        key: args.key,
-      );
-    },
-  );
-}
-
-class NewTaskRouteArgs {
-  const NewTaskRouteArgs({
-    required this.projectId,
-    required this.projectName,
-    this.key,
-  });
-
-  final String projectId;
-
-  final String projectName;
-
-  final Key? key;
-
-  @override
-  String toString() {
-    return 'NewTaskRouteArgs{projectId: $projectId, projectName: $projectName, key: $key}';
-  }
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    if (other is! NewTaskRouteArgs) return false;
-    return projectId == other.projectId &&
-        projectName == other.projectName &&
-        key == other.key;
-  }
-
-  @override
-  int get hashCode => projectId.hashCode ^ projectName.hashCode ^ key.hashCode;
-}
-
-/// generated route for
 /// [PairingPage]
 class PairingRoute extends PageRouteInfo<void> {
   const PairingRoute({List<PageRouteInfo>? children})
@@ -212,6 +148,131 @@ class PairingRoute extends PageRouteInfo<void> {
       return const PairingPage();
     },
   );
+}
+
+/// generated route for
+/// [ProjectFilePage]
+class ProjectFileRoute extends PageRouteInfo<ProjectFileRouteArgs> {
+  ProjectFileRoute({
+    required String projectId,
+    required String path,
+    Key? key,
+    List<PageRouteInfo>? children,
+  }) : super(
+          ProjectFileRoute.name,
+          args:
+              ProjectFileRouteArgs(projectId: projectId, path: path, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'ProjectFileRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<ProjectFileRouteArgs>();
+      return ProjectFilePage(
+        projectId: args.projectId,
+        path: args.path,
+        key: args.key,
+      );
+    },
+  );
+}
+
+class ProjectFileRouteArgs {
+  const ProjectFileRouteArgs({
+    required this.projectId,
+    required this.path,
+    this.key,
+  });
+
+  final String projectId;
+
+  final String path;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'ProjectFileRouteArgs{projectId: $projectId, path: $path, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! ProjectFileRouteArgs) return false;
+    return projectId == other.projectId &&
+        path == other.path &&
+        key == other.key;
+  }
+
+  @override
+  int get hashCode => projectId.hashCode ^ path.hashCode ^ key.hashCode;
+}
+
+/// generated route for
+/// [ProjectPage]
+class ProjectRoute extends PageRouteInfo<ProjectRouteArgs> {
+  ProjectRoute({
+    required String projectId,
+    required String projectName,
+    Key? key,
+    List<PageRouteInfo>? children,
+  }) : super(
+          ProjectRoute.name,
+          args: ProjectRouteArgs(
+            projectId: projectId,
+            projectName: projectName,
+            key: key,
+          ),
+          initialChildren: children,
+        );
+
+  static const String name = 'ProjectRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<ProjectRouteArgs>();
+      return ProjectPage(
+        projectId: args.projectId,
+        projectName: args.projectName,
+        key: args.key,
+      );
+    },
+  );
+}
+
+class ProjectRouteArgs {
+  const ProjectRouteArgs({
+    required this.projectId,
+    required this.projectName,
+    this.key,
+  });
+
+  final String projectId;
+
+  final String projectName;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'ProjectRouteArgs{projectId: $projectId, projectName: $projectName, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! ProjectRouteArgs) return false;
+    return projectId == other.projectId &&
+        projectName == other.projectName &&
+        key == other.key;
+  }
+
+  @override
+  int get hashCode => projectId.hashCode ^ projectName.hashCode ^ key.hashCode;
 }
 
 /// generated route for

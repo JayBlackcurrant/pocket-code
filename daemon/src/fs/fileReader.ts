@@ -1,6 +1,54 @@
-import { readFileSync, statSync } from 'node:fs';
-import { relative } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { safeResolveWithin } from './pathSafety.js';
+
+/** Directories/files never shown in the project browser (heavy or noise). */
+const IGNORED_NAMES = new Set([
+  '.git',
+  '.worktrees',
+  'node_modules',
+  'build',
+  'dist',
+  '.dart_tool',
+  '.fvm',
+  '.idea',
+  '.vscode',
+  '.DS_Store',
+]);
+
+export interface TreeEntry {
+  name: string;
+  path: string; // relative to the root
+  type: 'dir' | 'file';
+}
+
+/**
+ * List one directory inside `root` (S: project browser), path-safe. Directories first,
+ * then files, both alphabetical. Heavy/noise entries are hidden. Non-recursive — the
+ * client expands folders on demand.
+ */
+export function listDir(root: string, relPath: string): TreeEntry[] {
+  const abs = safeResolveWithin(root, relPath === '' ? '.' : relPath);
+  let stat;
+  try {
+    stat = statSync(abs);
+  } catch {
+    throw new FileNotFoundError(relPath);
+  }
+  if (!stat.isDirectory()) throw new NotADirectoryError(relPath);
+
+  return readdirSync(abs, { withFileTypes: true })
+    .filter((e) => !IGNORED_NAMES.has(e.name))
+    .map((e) => ({
+      name: e.name,
+      path: relative(root, join(abs, e.name)),
+      type: (e.isDirectory() ? 'dir' : 'file') as 'dir' | 'file',
+    }))
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+}
 
 /** Cap returned file content so a huge file can't blow up the daemon/phone. */
 export const FILE_MAX_BYTES = 512 * 1024;
@@ -16,6 +64,13 @@ export class NotAFileError extends Error {
   constructor(path: string) {
     super(`not a file: "${path}"`);
     this.name = 'NotAFileError';
+  }
+}
+
+export class NotADirectoryError extends Error {
+  constructor(path: string) {
+    super(`not a directory: "${path}"`);
+    this.name = 'NotADirectoryError';
   }
 }
 

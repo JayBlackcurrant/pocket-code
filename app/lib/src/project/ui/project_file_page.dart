@@ -3,20 +3,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
-import '../providers/diff_providers.dart';
-import 'code_view.dart';
+import '../../review/ui/code_view.dart';
+import '../providers/project_providers.dart';
 
-/// Full-file code viewer for a task worktree (S2-08).
+/// View a project file (read-only) in the browser.
 @RoutePage()
-class CodeViewerPage extends ConsumerWidget {
-  const CodeViewerPage({required this.taskId, required this.path, super.key});
+class ProjectFilePage extends ConsumerWidget {
+  const ProjectFilePage(
+      {required this.projectId, required this.path, super.key});
 
-  final String taskId;
+  final String projectId;
   final String path;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final file = ref.watch(fileContentProvider(taskId, path));
+    final file = ref.watch(projectFileProvider(projectId, path));
     return Scaffold(
       appBar: AppBar(title: Text(path.split('/').last)),
       body: file.when(
