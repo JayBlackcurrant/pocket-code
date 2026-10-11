@@ -369,7 +369,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const base = taskBaseRef(deps, task.projectId);
     if (!base) return reply.code(409).send({ error: 'unknown project base' });
     try {
-      const files = await deps.git.diffSummary(task.worktree, base);
+      const files = await deps.git.diffSummary(task.worktree, base, task.branch || undefined);
       return { base, files };
     } catch (err) {
       if (err instanceof GitError) return reply.code(500).send({ error: err.message });
@@ -390,7 +390,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const base = taskBaseRef(deps, task.projectId);
       if (!base) return reply.code(409).send({ error: 'unknown project base' });
       try {
-        return await deps.git.diffFile(task.worktree, base, q.data.path);
+        return await deps.git.diffFile(task.worktree, base, q.data.path, {
+          ...(task.branch ? { branch: task.branch } : {}),
+        });
       } catch (err) {
         if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
         if (err instanceof GitError) return reply.code(500).send({ error: err.message });
@@ -455,7 +457,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (!task.worktree) return reply.code(409).send({ error: 'task has no worktree yet' });
     const base = taskBaseRef(deps, task.projectId);
     if (!base) return reply.code(409).send({ error: 'unknown project base' });
-    return { message: await deps.git.suggestCommitMessage(task.worktree, base) };
+    return { message: await deps.git.suggestCommitMessage(task.worktree, base, task.branch || undefined) };
   });
 
   // Suggested tester-facing release notes (S3-03), editable in the app before upload.
@@ -481,7 +483,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (!base) return reply.code(409).send({ error: 'unknown project base' });
     const parsed = CommitBody.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: 'invalid body' });
-    const message = parsed.data.message ?? (await deps.git.suggestCommitMessage(task.worktree, base));
+    const message = parsed.data.message ?? (await deps.git.suggestCommitMessage(task.worktree, base, task.branch || undefined));
     try {
       return await deps.git.commitAll(task.worktree, message);
     } catch (err) {

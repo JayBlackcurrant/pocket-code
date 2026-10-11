@@ -254,3 +254,36 @@ describe('GitService git actions (S2-09)', () => {
     await expect(svc.pushBranch(repo2, 'origin', 'main')).rejects.toThrow(/non-claude/);
   });
 });
+
+describe('GitService.diffSummary (branch-aware, single checkout)', () => {
+  let r: string;
+  const svc2 = new GitService();
+
+  beforeAll(async () => {
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'pc-bdiff-')));
+    r = join(base, 'repo');
+    mkdirSync(r, { recursive: true });
+    await runGit(r, ['init', '-b', 'stag']);
+    writeFileSync(join(r, 'README.md'), '# base\n');
+    await runGit(r, ['add', '.']);
+    await runGit(r, ['-c', 'user.email=t@t', '-c', 'user.name=Test', 'commit', '-m', 'base']);
+    // A task branch with a COMMITTED change, then switch the checkout back to stag.
+    await runGit(r, ['checkout', '-b', 'claude/feature', 'stag']);
+    writeFileSync(join(r, 'feature.txt'), 'hi\n');
+    await runGit(r, ['add', '.']);
+    await runGit(r, ['-c', 'user.email=t@t', '-c', 'user.name=Test', 'commit', '-m', 'feat']);
+    await runGit(r, ['checkout', 'stag']);
+  });
+
+  afterAll(() => rmSync(join(r, '..'), { recursive: true, force: true }));
+
+  it('shows a branch\'s committed changes even when checked out elsewhere', async () => {
+    // Without the branch arg (working tree vs base) nothing shows — we are on stag.
+    expect(await svc2.diffSummary(r, 'stag')).toHaveLength(0);
+    // With the branch arg it diffs base...branch, so the committed file shows.
+    const files = await svc2.diffSummary(r, 'stag', 'claude/feature');
+    expect(files.map((f) => f.path)).toContain('feature.txt');
+    const diff = await svc2.diffFile(r, 'stag', 'feature.txt', { branch: 'claude/feature' });
+    expect(diff.patch).toContain('+hi');
+  });
+});

@@ -76,6 +76,18 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-11 — Review shows a task's changes reliably (branch-aware diff) — dev side
+Review could show "No changes" though the task changed files: the single-checkout model means
+the diff was always working-tree-vs-base, so it was wrong/empty whenever the task's branch
+wasn't the one currently checked out (an older task, or after continue/build moved the checkout)
+or when the changes were committed.
+- `diffSummary`/`diffFile`/`suggestCommitMessage` are now **branch-aware** (take the task's
+  branch): working-tree diff (`base`) when that branch IS checked out (shows uncommitted agent
+  edits), else the branch's committed diff (`base...branch`). Untracked files only when on-branch.
+- Endpoints pass `task.branch`. No app change (same endpoints).
+- **Tested:** typecheck clean, **174 tests** (+1: a branch's committed change shows via the
+  branch arg even while checked out on stag; empty without it). `git pull` + restart.
+
 ### 2026-10-11 — continue a task (resume its session on its branch, UX #2) — dev side
 - `AgentRunner.continueTask({taskId, prompt, model?})`: checks out the task's branch, resumes
   its Claude session (`runAgent` gained a `resume` option → SDK `resume: sessionId`), appends

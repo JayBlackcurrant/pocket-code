@@ -209,16 +209,31 @@ export class GitService {
     }
   }
 
+  /** Short name of the currently checked-out branch (or '' if detached). */
+  private async currentBranch(repoPath: string): Promise<string> {
+    try {
+      return (await this.git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    } catch {
+      return '';
+    }
+  }
+
   /**
-   * Changed files vs the base ref (S2-05): tracked changes from `git diff` plus untracked
-   * files, with rename detection, +/- counts, and binary flags.
+   * Changed files for a task (S2-05): tracked changes plus (when applicable) untracked files.
+   *
+   * Single-checkout model: a task's work lives on `branch`. When that branch IS checked out we
+   * diff the working tree vs base (`base`), so uncommitted agent edits show. When it is NOT (an
+   * older task, or the checkout moved), we diff the branch's commits vs base (`base...branch`),
+   * so committed work still shows. Without a branch we fall back to the working tree.
    */
-  async diffSummary(repoPath: string, baseRef: string): Promise<DiffFileSummary[]> {
+  async diffSummary(repoPath: string, baseRef: string, branch?: string): Promise<DiffFileSummary[]> {
     const base = await this.resolveBaseRef(repoPath, baseRef);
+    const onBranch = !branch || (await this.currentBranch(repoPath)) === branch;
+    const target = onBranch ? base : `${base}...${branch}`;
     const files = new Map<string, DiffFileSummary>();
 
     // Status + paths (authoritative; carries rename old/new).
-    const nameStatus = await this.gitDiff(repoPath, ['diff', '--name-status', '-M', base]);
+    const nameStatus = await this.gitDiff(repoPath, ['diff', '--name-status', '-M', target]);
     for (const line of nameStatus.split('\n')) {
       if (line.trim() === '') continue;
       const parts = line.split('\t');
@@ -241,7 +256,7 @@ export class GitService {
     }
 
     // Line counts (keyed by the new path).
-    const numstat = await this.gitDiff(repoPath, ['diff', '--numstat', '-M', base]);
+    const numstat = await this.gitDiff(repoPath, ['diff', '--numstat', '-M', target]);
     for (const line of numstat.split('\n')) {
       if (line.trim() === '') continue;
       const [addRaw, delRaw, ...rest] = line.split('\t');
@@ -256,8 +271,10 @@ export class GitService {
       }
     }
 
-    // Untracked files (not shown by `git diff`).
-    const untracked = await this.git(repoPath, ['ls-files', '--others', '--exclude-standard']);
+    // Untracked files (working-tree only — relevant when the branch is checked out).
+    const untracked = onBranch
+      ? await this.git(repoPath, ['ls-files', '--others', '--exclude-standard'])
+      : '';
     for (const path of untracked.split('\n')) {
       if (path.trim() === '' || files.has(path)) continue;
       const stat = await this.gitDiff(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', path]);
@@ -275,23 +292,26 @@ export class GitService {
     return [...files.values()].sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  /** Unified patch for one changed file vs base (S2-05), size-capped. */
+  /** Unified patch for one changed file vs base (S2-05), size-capped. Branch-aware like
+   *  diffSummary: working-tree diff when `branch` is checked out, else the branch's committed diff. */
   async diffFile(
     repoPath: string,
     baseRef: string,
     relPath: string,
-    opts: { maxBytes?: number; maxLines?: number } = {},
+    opts: { maxBytes?: number; maxLines?: number; branch?: string } = {},
   ): Promise<FileDiff> {
-    const { maxBytes = DIFF_MAX_BYTES, maxLines = DIFF_MAX_LINES } = opts;
+    const { maxBytes = DIFF_MAX_BYTES, maxLines = DIFF_MAX_LINES, branch } = opts;
     const abs = safeResolveWithin(repoPath, relPath); // blocks traversal/symlink escape
     const rel = relative(repoPath, abs);
     const base = await this.resolveBaseRef(repoPath, baseRef);
+    const onBranch = !branch || (await this.currentBranch(repoPath)) === branch;
 
     const isUntracked =
+      onBranch &&
       (await this.git(repoPath, ['ls-files', '--others', '--exclude-standard', '--', rel])).trim() !== '';
     const patch = isUntracked
       ? await this.gitDiff(repoPath, ['diff', '-U3', '--no-index', '--', '/dev/null', rel])
-      : await this.gitDiff(repoPath, ['diff', '-U3', '-M', base, '--', rel]);
+      : await this.gitDiff(repoPath, ['diff', '-U3', '-M', onBranch ? base : `${base}...${branch}`, '--', rel]);
 
     if (/^Binary files /m.test(patch)) {
       return { path: rel, binary: true, truncated: false, patch: null };
@@ -312,8 +332,8 @@ export class GitService {
   }
 
   /** Suggest a commit message from the changed-files summary (editable in the app). */
-  async suggestCommitMessage(repoPath: string, baseRef: string): Promise<string> {
-    const files = await this.diffSummary(repoPath, baseRef);
+  async suggestCommitMessage(repoPath: string, baseRef: string, branch?: string): Promise<string> {
+    const files = await this.diffSummary(repoPath, baseRef, branch);
     if (files.length === 0) return 'chore: no changes';
     if (files.length === 1) return `chore: update ${files[0]!.path}`;
     return `chore: update ${files.length} files`;
