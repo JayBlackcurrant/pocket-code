@@ -81,6 +81,8 @@ const CreateTaskBody = z.object({
   prompt: z.string().min(1),
   model: z.string().min(1).optional(),
   taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(),
+  // Short branch title (the user's message), so the branch isn't named from a folded prompt.
+  title: z.string().min(1).max(200).optional(),
 });
 
 const EventsQuery = z.object({
@@ -258,6 +260,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         prompt: parsed.data.prompt,
         ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
         ...(parsed.data.taskId !== undefined ? { taskId: parsed.data.taskId } : {}),
+        ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
       });
       return reply.code(201).send(started);
     } catch (err) {

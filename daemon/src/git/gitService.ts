@@ -58,15 +58,27 @@ function assertTaskId(taskId: string): void {
   }
 }
 
-/** Turn an arbitrary task name into a branch-safe slug. */
+/** Turn an arbitrary task name into a short, sensible branch-safe slug: a few leading words,
+ *  cut on word boundaries (no mid-word truncation), capped to keep `claude/<slug>` readable. */
 export function slugify(input: string): string {
-  const s = input
+  const words = input
     .toLowerCase()
     .normalize('NFKD')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-    .replace(/-+$/, '');
+    .replace(/[^a-z0-9\s]+/g, ' ') // non-alphanumerics -> spaces
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+
+  const picked: string[] = [];
+  let len = 0;
+  for (const w of words) {
+    if (picked.length >= 6) break; // at most ~6 words
+    const added = w.length + (picked.length > 0 ? 1 : 0);
+    if (picked.length > 0 && len + added > 32) break; // keep it short (~32 chars)
+    picked.push(w);
+    len += added;
+  }
+  const s = picked.join('-');
   return s.length > 0 ? s : 'task';
 }
 

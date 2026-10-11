@@ -90,7 +90,7 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
         : 'Please consider these files:\n${_attachments.map((p) => '- $p').join('\n')}\n\n$msg';
     final started = await ref
         .read(newTaskControllerProvider.notifier)
-        .create(widget.projectId, prompt);
+        .create(widget.projectId, prompt, title: msg);
     if (!mounted || started == null) return;
     await context.router.push(TaskRoute(taskId: started.taskId));
   }

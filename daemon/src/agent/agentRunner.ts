@@ -87,6 +87,9 @@ export interface StartTaskInput {
   prompt: string;
   taskId?: string;
   model?: string;
+  /** Short human title used to name the branch (falls back to the prompt). Lets the app name
+   *  the branch from the user's message, not a folded "consider these files…" prompt. */
+  title?: string;
 }
 
 export interface StartedTask {
@@ -219,7 +222,7 @@ export class AgentRunner {
       worktree = await this.git.createTaskBranch(project.resolvedPath, {
         taskId,
         baseRef: manifest.git.base,
-        name: input.prompt,
+        name: input.title ?? input.prompt,
       });
     } catch (err) {
       this.activeProjects.delete(manifest.id);

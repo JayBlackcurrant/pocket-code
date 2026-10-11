@@ -38,6 +38,16 @@ describe('slugify', () => {
     expect(slugify('Fix: Login!! ')).toBe('fix-login');
     expect(slugify('')).toBe('task');
   });
+
+  it('keeps slugs short and sensible (word-boundary, capped)', () => {
+    const slug = slugify(
+      'Please consider these files: lib/src/anger/widgets/button.dart and refactor everything now',
+    );
+    expect(slug.length).toBeLessThanOrEqual(32);
+    expect(slug.split('-').length).toBeLessThanOrEqual(6);
+    expect(slug).not.toMatch(/-$/); // no trailing dash / mid-word cut
+    expect(slug).toBe('please-consider-these-files-lib');
+  });
 });
 
 async function currentBranch(cwd: string): Promise<string> {

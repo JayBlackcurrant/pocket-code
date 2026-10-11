@@ -12,13 +12,17 @@ class NewTaskController extends _$NewTaskController {
   @override
   FutureOr<StartedTask?> build() => null;
 
-  Future<StartedTask?> create(String projectId, String prompt) async {
+  Future<StartedTask?> create(String projectId, String prompt, {String? title}) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       final dio = ref.read(apiProvider);
       final res = await dio.post<dynamic>(
         '/projects/$projectId/tasks',
-        data: {'prompt': prompt},
+        data: {
+          'prompt': prompt,
+          // Name the branch from the user's message, not the folded "consider these files" prompt.
+          if (title != null && title.isNotEmpty) 'title': title,
+        },
       ).guard();
       return StartedTask.fromJson(res.data as Map<String, dynamic>);
     });

@@ -76,6 +76,16 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-11 — short, sensible branch names — dev side
+Branches like `claude/please-consider-these-files-lib-src-ange` came from slugifying the whole
+folded prompt. Fixes:
+- `slugify` is now word-boundary + capped (≤6 words / ~32 chars, no mid-word cut).
+- The app names the branch from the **user's message**, not the "consider these files…" prompt:
+  create-task accepts an optional `title`; `runner.start` uses `title ?? prompt` for the slug.
+  App `newTaskController.create(..., title: msg)` sends it.
+- **Tested:** daemon typecheck clean, **168 tests** (+1 slug case); app analyze clean, 41 tests,
+  build bundle compiles. `git pull` + restart to pick up the daemon side.
+
 ### 2026-10-11 — build requires committed code (review → commit → build) — dev side
 Enforce the flow: after a task, you review + commit, and only then can you build.
 - `GitService.commitsAhead(repo, base, branch)` — count of committed, reviewable work.
