@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../../review/providers/review_status.dart';
+import '../../routes/app_router.dart';
 import '../../security/biometric_gate.dart';
 import '../../tasks/models/task_detail.dart';
 import '../../tasks/providers/task_provider.dart';
@@ -213,6 +215,8 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
   }
 
   Widget _startView(BuildContext context, TaskDetail task) {
+    // A build is only offered once the task's changes are committed (review → commit → build).
+    final status = ref.watch(taskReviewStatusProvider(widget.taskId));
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -225,33 +229,114 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
             style: context.text.regular12.copyWith(color: context.colors.muted),
           ),
           const SizedBox(height: 16),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _runCodegen,
-            onChanged: _busy ? null : (v) => setState(() => _runCodegen = v),
-            title: Text('Run codegen first', style: context.text.regular14),
-            subtitle: Text(
-              'pub get + build_runner before the APK build',
-              style:
-                  context.text.regular12.copyWith(color: context.colors.muted),
+          status.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
             ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : () => _start(task),
-              icon: _busy
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.rocket_launch_outlined),
-              label: const Text('Start build'),
-            ),
+            // If we can't read status, fall back to the start card (the daemon still gates).
+            error: (_, __) => _readyToBuild(context, task),
+            data: (s) {
+              if (s.hasUncommitted) return _commitRequired(context);
+              if (s.committedAhead == 0) return _nothingToBuild(context);
+              return _readyToBuild(context, task);
+            },
           ),
         ],
       ),
+    );
+  }
+
+  Widget _commitRequired(BuildContext context) {
+    return _gateCard(
+      context,
+      icon: Icons.rate_review_outlined,
+      color: context.colors.primary,
+      title: 'Review & commit first',
+      body:
+          'This task has uncommitted changes. Review the diff and commit before building.',
+      action: 'Review changes',
+    );
+  }
+
+  Widget _nothingToBuild(BuildContext context) {
+    return _gateCard(
+      context,
+      icon: Icons.info_outline,
+      color: context.colors.muted,
+      title: 'Nothing committed yet',
+      body:
+          'No committed changes on this branch to build. Review the task, then commit.',
+      action: 'Open review',
+    );
+  }
+
+  Widget _gateCard(
+    BuildContext context, {
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String body,
+    required String action,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(title, style: context.text.medium14),
+        ]),
+        const SizedBox(height: 8),
+        Text(body,
+            style:
+                context.text.regular14.copyWith(color: context.colors.muted)),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () async {
+              await context.router.push(ReviewRoute(taskId: widget.taskId));
+              // Re-check after returning — a commit should unlock the build.
+              ref.invalidate(taskReviewStatusProvider(widget.taskId));
+            },
+            icon: const Icon(Icons.rate_review_outlined),
+            label: Text(action),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _readyToBuild(BuildContext context, TaskDetail task) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _runCodegen,
+          onChanged: _busy ? null : (v) => setState(() => _runCodegen = v),
+          title: Text('Run codegen first', style: context.text.regular14),
+          subtitle: Text(
+            'pub get + build_runner before the APK build',
+            style: context.text.regular12.copyWith(color: context.colors.muted),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _busy ? null : () => _start(task),
+            icon: _busy
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.rocket_launch_outlined),
+            label: const Text('Start build'),
+          ),
+        ),
+      ],
     );
   }
 

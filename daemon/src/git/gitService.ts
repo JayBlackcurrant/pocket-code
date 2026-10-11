@@ -106,6 +106,17 @@ export class GitService {
     return (await this.git(repoPath, ['status', '--porcelain'])).trim() === '';
   }
 
+  /** Number of commits `branch` is ahead of `baseRef` (committed, reviewable work). */
+  async commitsAhead(repoPath: string, baseRef: string, branch: string): Promise<number> {
+    const base = await this.resolveBaseRef(repoPath, baseRef);
+    try {
+      const out = await this.git(repoPath, ['rev-list', '--count', `${base}..${branch}`]);
+      return Number(out.trim()) || 0;
+    } catch {
+      return 0; // branch may not exist yet
+    }
+  }
+
   /** Check out an existing branch. Fails (GitError) if switching away from a dirty tree —
    *  a no-op when already on `branch`. Used before a build to target the task's branch. */
   async checkoutBranch(repoPath: string, branch: string): Promise<void> {

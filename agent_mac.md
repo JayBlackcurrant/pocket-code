@@ -76,6 +76,17 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-11 — build requires committed code (review → commit → build) — dev side
+Enforce the flow: after a task, you review + commit, and only then can you build.
+- `GitService.commitsAhead(repo, base, branch)` — count of committed, reviewable work.
+- New `GET /tasks/:id/review-status` → `{ base, branch, clean, committedAhead, buildReady }`
+  (`buildReady = clean && committedAhead > 0`). Drives the app's gate.
+- **Build gate:** `POST /projects/:id/builds` with a `taskId` now returns **409 "Uncommitted
+  changes — review and commit before building"** when the checkout is dirty (backstop; the app
+  also hides the Start button until committed). Clean tree = the task's edits are committed.
+- **Tested:** typecheck clean, **167 tests** (+1: commitsAhead + clean→dirty→committed around
+  commitAll). **➡️ Action on this Mac:** `git pull` + restart to serve review-status + the gate.
+
 ### 2026-10-11 — tasks run in the project dir on a per-task branch (worktrees dropped) — this Mac
 Branch `claude/in-place-task-branches` (`6916790`). Root cause of the staging build's
 *"StagSign missing storeFile"*: tasks ran in `.worktrees/<id>`, which hold only tracked files, so

@@ -80,6 +80,21 @@
 
 ## Log
 
+### 2026-10-11 — review → commit → build gating (app)
+Build is now only offered after the task's changes are committed.
+- New `review/providers/review_status.dart` → `GET /tasks/:id/review-status`
+  (`clean`, `committedAhead`, `buildReady`).
+- **Task page:** when a task finishes (`done`), a green banner nudges *"review the changes and
+  commit, then build"* with a **Review** button.
+- **Builds screen:** the start view now branches on review-status — **Review & commit first**
+  (uncommitted changes), **Nothing committed yet** (clean but 0 ahead), or the normal codegen
+  toggle + **Start build** (buildReady). The gate card's button opens Review and re-checks on
+  return.
+- **Review screen:** commit/revert now invalidates `taskReviewStatus` so the build unlocks
+  immediately after committing.
+- Daemon backstops with a 409 if a dirty build is somehow requested (see agent_mac.md).
+- **Tested:** `analyze` clean, `flutter test` 41/41, `flutter build bundle` compiles.
+
 ### 2026-10-10 — S3-05 notifications inbox (self-contained)
 - New `src/notifications/` feature consuming the daemon's self-contained notifications
   (no external push — see `agent_mac.md`). `NotificationsStream` (**keepAlive**) loads recent

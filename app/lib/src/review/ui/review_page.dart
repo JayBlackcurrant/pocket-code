@@ -8,6 +8,7 @@ import '../../security/biometric_gate.dart';
 import '../models/diff_file.dart';
 import '../providers/diff_providers.dart';
 import '../providers/git_actions.dart';
+import '../providers/review_status.dart';
 
 /// Changed-files list for a task (S2-07) with git actions (S2-09).
 @RoutePage()
@@ -108,6 +109,9 @@ class ReviewPage extends ConsumerWidget {
     try {
       final msg = await action();
       ref.invalidate(diffSummaryProvider(taskId));
+      ref.invalidate(taskReviewStatusProvider(
+          taskId)); // commit/revert may unlock the build
+
       if (context.mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(msg)));

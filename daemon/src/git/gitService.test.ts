@@ -97,6 +97,16 @@ describe('GitService', () => {
     ).rejects.toThrow();
   });
 
+  it('counts commits a task branch is ahead of base (review-status / build gate)', async () => {
+    const wt = await svc.createTaskBranch(repo, { taskId: 'ahead', name: 'ahead', baseRef: 'stag' });
+    expect(await svc.commitsAhead(repo, 'stag', wt.branch)).toBe(0); // nothing committed yet
+    writeFileSync(join(repo, 'feature.txt'), 'work\n');
+    expect(await svc.isClean(repo)).toBe(false); // uncommitted -> build must be blocked
+    await svc.commitAll(repo, 'feat: add feature');
+    expect(await svc.isClean(repo)).toBe(true); // committed -> build can proceed
+    expect(await svc.commitsAhead(repo, 'stag', wt.branch)).toBe(1);
+  });
+
   it('refuses to start a task on a dirty working tree', async () => {
     writeFileSync(join(repo, 'dirty.txt'), 'x\n');
     await expect(

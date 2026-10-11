@@ -286,6 +286,26 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   );
 
+  // Review/commit state of a task's branch, to drive the review→commit→build flow (the build
+  // becomes available only once changes are committed). clean = no uncommitted changes;
+  // committedAhead = commits on the branch past base; buildReady = clean && committedAhead > 0.
+  app.get<{ Params: { id: string } }>('/tasks/:id/review-status', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    const base = taskBaseRef(deps, task.projectId);
+    if (!task.worktree || !task.branch || !base) {
+      return { base: base ?? null, branch: task.branch || null, clean: true, committedAhead: 0, buildReady: false };
+    }
+    try {
+      const clean = await deps.git.isClean(task.worktree);
+      const committedAhead = await deps.git.commitsAhead(task.worktree, base, task.branch);
+      return { base, branch: task.branch, clean, committedAhead, buildReady: clean && committedAhead > 0 };
+    } catch (err) {
+      if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+      throw err;
+    }
+  });
+
   // Changed-files summary for a task's worktree vs the project base (S2-05).
   app.get<{ Params: { id: string } }>('/tasks/:id/diff/summary', auth, async (req, reply) => {
     const task = deps.tasks.get(req.params.id);
@@ -501,6 +521,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (!project) return reply.code(404).send({ error: 'unknown project' });
     if (project.status !== 'active') {
       return reply.code(409).send({ error: `project not active: ${project.reason ?? project.status}` });
+    }
+    // Build only committed code: refuse while the checkout has uncommitted changes (review
+    // and commit first). Applies to task builds; the checkout is where the task ran.
+    if (parsed.data.taskId !== undefined && project.resolvedPath) {
+      const clean = await deps.git.isClean(project.resolvedPath);
+      if (!clean) {
+        return reply
+          .code(409)
+          .send({ error: 'Uncommitted changes — review and commit before building.' });
+      }
     }
     try {
       const build = deps.builds.enqueue({

@@ -83,6 +83,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
         children: [
           if (!state.connected && !state.isTerminal) _connectingBanner(context),
           if (state.error != null) _errorBanner(context, state.error!),
+          if (state.status == 'done') _doneBanner(context),
           for (final p in state.pending)
             _ApprovalCard(
               approval: p,
@@ -113,6 +114,29 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       bottomNavigationBar: state.isRunning ? _stopBar(context, state) : null,
     );
   }
+
+  // Work finished → nudge the review → commit → build flow.
+  Widget _doneBanner(BuildContext context) => Container(
+        width: double.infinity,
+        color: context.colors.green.withValues(alpha: 0.12),
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Work finished — review the changes and commit, then build.',
+                style: context.text.regular12
+                    .copyWith(color: context.colors.onSurface),
+              ),
+            ),
+            TextButton(
+              onPressed: () =>
+                  context.router.push(ReviewRoute(taskId: widget.taskId)),
+              child: const Text('Review'),
+            ),
+          ],
+        ),
+      );
 
   Widget _connectingBanner(BuildContext context) => Container(
         width: double.infinity,
