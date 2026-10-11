@@ -85,6 +85,11 @@ const CreateTaskBody = z.object({
   title: z.string().min(1).max(200).optional(),
 });
 
+const ContinueTaskBody = z.object({
+  prompt: z.string().min(1),
+  model: z.string().min(1).optional(),
+});
+
 const EventsQuery = z.object({
   since: z.coerce.number().int().min(0).default(0),
 });
@@ -292,6 +297,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // One task owns a project's checkout at a time (no more worktrees).
       if (err instanceof ProjectBusyError) return reply.code(409).send({ error: err.message });
       throw err;
+    }
+  });
+
+  // Continue an existing task: resume its Claude session on its branch with a new prompt (#2).
+  app.post<{ Params: { id: string } }>('/tasks/:id/continue', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    const parsed = ContinueTaskBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+    }
+    try {
+      const started = await deps.runner.continueTask({
+        taskId: req.params.id,
+        prompt: parsed.data.prompt,
+        ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
+      });
+      return reply.code(201).send(started);
+    } catch (err) {
+      if (err instanceof ProjectBusyError) return reply.code(409).send({ error: err.message });
+      // Not-resumable states (no session / no branch / inactive / dirty switch) are client-fixable.
+      return reply.code(409).send({ error: (err as Error).message });
     }
   });
 

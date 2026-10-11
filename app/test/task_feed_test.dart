@@ -31,6 +31,7 @@ void main() {
 
   test('lifecycle status transitions', () {
     expect(statusFromEvent('task.started', null), 'running');
+    expect(statusFromEvent('task.resumed', null), 'running');
     expect(statusFromEvent('task.completed', {'status': 'done'}), 'done');
     expect(statusFromEvent('task.cancelled', null), 'cancelled');
     expect(statusFromEvent('task.error', null), 'failed');

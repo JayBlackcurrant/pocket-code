@@ -24,11 +24,22 @@ class TaskPage extends ConsumerStatefulWidget {
 
 class _TaskPageState extends ConsumerState<TaskPage> {
   final ScrollController _scroll = ScrollController();
+  final TextEditingController _continue = TextEditingController();
 
   @override
   void dispose() {
     _scroll.dispose();
+    _continue.dispose();
     super.dispose();
+  }
+
+  Future<void> _sendContinue() async {
+    final text = _continue.text.trim();
+    if (text.isEmpty) return;
+    _continue.clear();
+    await ref
+        .read(taskStreamProvider(widget.taskId).notifier)
+        .continueTask(text);
   }
 
   // "Always allow" is a sensitive action — gate behind biometric (S3-07).
@@ -111,9 +122,47 @@ class _TaskPageState extends ConsumerState<TaskPage> {
           ),
         ],
       ),
-      bottomNavigationBar: state.isRunning ? _stopBar(context, state) : null,
+      bottomNavigationBar: state.isRunning
+          ? _stopBar(context, state)
+          : state.isTerminal
+              ? _continueBar(context)
+              : null,
     );
   }
+
+  // Continue a finished task: resume its session on the same branch with a follow-up (#2).
+  Widget _continueBar(BuildContext context) => SafeArea(
+        child: Container(
+          decoration: BoxDecoration(
+            color: context.colors.surface,
+            border: Border(top: BorderSide(color: context.colors.border)),
+          ),
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _continue,
+                  minLines: 1,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    hintText: 'Continue this task…',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                icon: const Icon(Icons.arrow_upward),
+                tooltip: 'Continue',
+                onPressed: _sendContinue,
+              ),
+            ],
+          ),
+        ),
+      );
 
   // Work finished → nudge the review → commit → build flow.
   Widget _doneBanner(BuildContext context) => Container(

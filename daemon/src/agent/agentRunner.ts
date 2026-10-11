@@ -98,6 +98,12 @@ export interface StartedTask {
   worktree: string;
 }
 
+export interface ContinueTaskInput {
+  taskId: string;
+  prompt: string;
+  model?: string;
+}
+
 function genTaskId(): string {
   return 't' + randomBytes(8).toString('hex');
 }
@@ -255,12 +261,76 @@ export class AgentRunner {
     return { taskId, branch: worktree.branch, worktree: worktree.path };
   }
 
-  private async runAgent(taskId: string, cwd: string, input: StartTaskInput): Promise<void> {
+  /**
+   * Continue an existing task: check out its `claude/<slug>` branch and resume its Claude
+   * session with a new prompt, appending to the same task's event log. Keeps the single-owner
+   * gate (ProjectBusyError) and runs in the project checkout. The task must have a stored
+   * session id and branch.
+   */
+  async continueTask(input: ContinueTaskInput): Promise<StartedTask> {
+    const task = this.tasks.get(input.taskId);
+    if (!task) throw new Error(`unknown task: "${input.taskId}"`);
+    if (!task.sessionId) throw new Error(`task "${input.taskId}" has no session to resume`);
+    if (!task.branch || !task.worktree) throw new Error(`task "${input.taskId}" has no branch`);
+
+    const project = this.registry.getActive(task.projectId);
+    if (!project?.resolvedPath) throw new Error(`project not active: "${task.projectId}"`);
+    const manifest = project.manifest;
+
+    if (this.activeProjects.has(manifest.id)) {
+      throw new ProjectBusyError(
+        `project "${manifest.id}" already has an active task; finish or discard it first`,
+      );
+    }
+    this.activeProjects.add(manifest.id);
+
+    try {
+      // Put the checkout on the task's branch (no-op if already there; fails on a dirty switch).
+      await this.git.checkoutBranch(project.resolvedPath, task.branch);
+    } catch (err) {
+      this.activeProjects.delete(manifest.id);
+      this.fail(input.taskId, 'checkout', err);
+      throw err;
+    }
+
+    this.tasks.setStatus(input.taskId, 'running');
+    this.persist(input.taskId, 'task.resumed', { branch: task.branch, prompt: input.prompt });
+    this.log.info(
+      { taskId: input.taskId, projectId: manifest.id, branch: task.branch, model: input.model ?? null },
+      'task resumed',
+    );
+
+    const run = this.runAgent(
+      input.taskId,
+      project.resolvedPath,
+      { projectId: manifest.id, prompt: input.prompt, ...(input.model !== undefined ? { model: input.model } : {}) },
+      task.sessionId,
+    ).finally(() => {
+      this.running.delete(input.taskId);
+      this.broker.clearTask(input.taskId);
+      this.activeProjects.delete(manifest.id);
+    });
+    this.settled.set(input.taskId, run);
+    run.catch(() => {
+      /* failures are recorded as events; never crash the daemon */
+    });
+
+    return { taskId: input.taskId, branch: task.branch, worktree: project.resolvedPath };
+  }
+
+  private async runAgent(
+    taskId: string,
+    cwd: string,
+    input: StartTaskInput,
+    resume?: string,
+  ): Promise<void> {
     const abort = new AbortController();
     const options: Options = {
       cwd,
       abortController: abort,
       permissionMode: this.defaultPermissionMode,
+      // Resume the task's prior Claude session so it keeps its context (continue a task).
+      ...(resume !== undefined ? { resume } : {}),
       // Permission rules (S2-02) run first: dangerous tools are denied and never run,
       // safe ones are auto-allowed; everything else parks for the phone (S2-01).
       canUseTool: (toolName, toolInput, opts): Promise<PermissionResult> => {

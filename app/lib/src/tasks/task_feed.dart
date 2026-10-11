@@ -23,6 +23,8 @@ String? statusFromEvent(String type, dynamic payload) {
   switch (type) {
     case 'task.started':
       return 'running';
+    case 'task.resumed':
+      return 'running';
     case 'task.completed':
       return (payload is Map ? payload['status'] as String? : null) ?? 'done';
     case 'task.cancelled':
@@ -68,6 +70,12 @@ List<FeedItem> mapEventToItems(int seq, String type, dynamic payload) {
     case 'task.cancelled':
       return [
         FeedItem(seq: seq, kind: FeedKind.lifecycle, title: 'Task cancelled')
+      ];
+    case 'task.resumed':
+      final p = payload is Map ? payload['prompt']?.toString() : null;
+      return [
+        FeedItem(
+            seq: seq, kind: FeedKind.lifecycle, title: 'Task resumed', body: p)
       ];
     case 'task.error':
       final msg = payload is Map ? payload['message']?.toString() : null;

@@ -76,6 +76,18 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-11 — continue a task (resume its session on its branch, UX #2) — dev side
+- `AgentRunner.continueTask({taskId, prompt, model?})`: checks out the task's branch, resumes
+  its Claude session (`runAgent` gained a `resume` option → SDK `resume: sessionId`), appends
+  to the **same task's** event log, emits `task.resumed`. Keeps the one-task-per-project gate
+  (ProjectBusyError → 409). Requires a stored session id + branch.
+- New `POST /tasks/:id/continue {prompt, model?}` → 201 (409 busy / not-resumable).
+- App: task page shows a **"Continue this task…"** composer when the task is terminal; sends
+  continue and the new events stream over the existing task socket (task.resumed → running).
+- **Tested:** daemon typecheck clean, **173 tests** (+2: resume passes sessionId + emits
+  task.resumed; refuses with no session). App: analyze clean, 41 tests, build bundle compiles.
+  `git pull` + restart to serve `/tasks/:id/continue`.
+
 ### 2026-10-11 — accept empty JSON body on body-less POSTs (fix push/cancel 400) — dev side
 Push/discard/cancel/retry failed with **400 FST_ERR_CTP_EMPTY_JSON_BODY**: the phone sends
 `Content-Type: application/json` even with no body, and Fastify's default parser rejects an

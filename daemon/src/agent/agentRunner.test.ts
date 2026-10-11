@@ -163,6 +163,39 @@ describe('AgentRunner', () => {
     expect(new Set(seqs).size).toBe(seqs.length);
   });
 
+  it('continues a task by resuming its session on the same branch (#2)', async () => {
+    const seenResume: Array<string | undefined> = [];
+    const query: QueryFn = ({ options }) => {
+      seenResume.push(options?.resume);
+      const gen = (async function* () {
+        yield sysInit;
+        yield resultOk;
+      })();
+      const q = gen as unknown as Query;
+      (q as unknown as { interrupt: () => Promise<void> }).interrupt = async () => undefined;
+      return q;
+    };
+    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query });
+
+    const started = await runner.start({ projectId: 'hedged', prompt: 'first' });
+    await runner.whenSettled(started.taskId);
+    expect(tasks.get(started.taskId)?.sessionId).toBe('sess-1');
+
+    const cont = await runner.continueTask({ taskId: started.taskId, prompt: 'keep going' });
+    expect(cont.branch).toBe(started.branch); // same branch
+    await runner.whenSettled(started.taskId);
+
+    expect(seenResume).toEqual([undefined, 'sess-1']); // start no resume; continue resumes
+    expect(tasks.get(started.taskId)?.status).toBe('done');
+    expect(events.since(started.taskId, 0).map((e) => e.type)).toContain('task.resumed');
+  });
+
+  it('refuses to continue a task with no session', async () => {
+    tasks.create({ id: 'nosess', projectId: 'hedged', branch: 'claude/x', worktree: repo });
+    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: fakeQuery([]) });
+    await expect(runner.continueTask({ taskId: 'nosess', prompt: 'x' })).rejects.toThrow(/no session/);
+  });
+
   it('marks the task failed when the result is an error', async () => {
     const runner = new AgentRunner({
       registry,

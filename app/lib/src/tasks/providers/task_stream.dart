@@ -186,6 +186,24 @@ class TaskStream extends _$TaskStream {
     });
   }
 
+  /// Continue the task (POST /tasks/:id/continue): resume its session with a new prompt (#2).
+  /// New events arrive over the existing socket; if it had dropped, reconnect to replay them.
+  Future<void> continueTask(String prompt, {String? model}) async {
+    final dio = ref.read(apiProvider);
+    try {
+      await dio.post<dynamic>(
+        '/tasks/$_taskId/continue',
+        data: {
+          'prompt': prompt,
+          if (model != null && model.isNotEmpty) 'model': model
+        },
+      );
+      if (_channel == null && !_disposed) _connect(_taskId);
+    } catch (e) {
+      state = state.copyWith(error: '$e');
+    }
+  }
+
   /// Stop the task (POST /tasks/:id/cancel). The cancellation then arrives as an event.
   Future<void> cancel(String taskId) async {
     final dio = ref.read(apiProvider);
