@@ -58,13 +58,12 @@ List<FeedItem> mapEventToItems(int seq, String type, dynamic payload) {
       ];
     case 'task.completed':
       final status = payload is Map ? payload['status'] : null;
-      final cost = payload is Map ? payload['costUsd'] : null;
+      // Cost is tracked server-side but intentionally not shown in the app.
       return [
         FeedItem(
           seq: seq,
           kind: FeedKind.lifecycle,
           title: 'Task ${status ?? 'done'}',
-          body: cost != null ? 'Cost: \$$cost' : null,
         ),
       ];
     case 'task.cancelled':

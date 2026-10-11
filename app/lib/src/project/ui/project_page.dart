@@ -204,10 +204,9 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: context.text.regular14),
+      // Cost is tracked server-side but intentionally not shown in the app.
       subtitle: Text(
-        t.costUsd != null
-            ? '${t.status} · \$${t.costUsd!.toStringAsFixed(4)}'
-            : t.status,
+        t.status,
         style: context.text.regular12.copyWith(color: context.colors.muted),
       ),
       trailing: Container(

@@ -80,6 +80,16 @@
 
 ## Log
 
+### 2026-10-11 — build-after-continue fix + hide cost
+- **Fix "stuck on the previous build":** the Build & ship screen auto-adopted the *latest*
+  build for the task — including a finished one — so after a build you couldn't start a new one
+  (it kept showing the old build/APK). Now it only auto-adopts a build that's **still in
+  progress**; a finished build shows the Start view. Added a **"New build" (+)** app-bar action
+  to leave a shown build and start another. So: continue → review → commit → **New build** works.
+- **Hide cost:** removed the `$cost` from the task list subtitle and the `task.completed` feed
+  item. `costUsd` is still parsed/stored (kept server-side), just not displayed.
+- **Tested:** analyze clean, 41 tests, build bundle compiles. App-only (no daemon change).
+
 ### 2026-10-11 — project screen: recent tasks tab + model picker (UX #1)
 - Project screen reshaped into **Tasks | Files** tabs (SegmentedButton). **Tasks** is the
   default: recent tasks from new `GET /projects/:id/tasks` (`projectTasks` provider), newest

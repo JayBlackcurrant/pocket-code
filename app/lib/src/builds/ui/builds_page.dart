@@ -68,7 +68,9 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
         final b = await ref
             .read(buildActionsProvider.notifier)
             .latestForTask(task.projectId, widget.taskId);
-        if (mounted && b != null && _buildId == null) {
+        // Only adopt a build that's still in progress, so you watch a running build but can
+        // start a NEW one after a finished build (don't get stuck on the previous build).
+        if (mounted && b != null && !b.finished && _buildId == null) {
           setState(() => _buildId = b.id);
         }
       } catch (_) {
@@ -183,7 +185,24 @@ class _BuildsPageState extends ConsumerState<BuildsPage> {
   Widget build(BuildContext context) {
     final taskAsync = ref.watch(taskDetailProvider(widget.taskId));
     return Scaffold(
-      appBar: AppBar(title: const Text('Build & ship')),
+      appBar: AppBar(
+        title: const Text('Build & ship'),
+        actions: [
+          if (_buildId != null)
+            IconButton(
+              tooltip: 'New build',
+              icon: const Icon(Icons.add),
+              onPressed: () {
+                setState(() {
+                  _buildId = null;
+                  _notesLoaded = false;
+                  _notes.clear();
+                });
+                ref.invalidate(taskReviewStatusProvider(widget.taskId));
+              },
+            ),
+        ],
+      ),
       body: taskAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _centerText(context, '$e'),
