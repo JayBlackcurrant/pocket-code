@@ -315,33 +315,13 @@ class _ApprovalCard extends StatelessWidget {
   final VoidCallback onAlwaysAllow;
 
   Future<void> _deny(BuildContext context) async {
-    final controller = TextEditingController();
-    final confirmed = await showDialog<bool>(
+    // The dialog owns its controller (see _DenyDialog) so it is never used after disposal
+    // during the pop animation. Returns the reason, or null when cancelled.
+    final reason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Deny tool'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Reason (optional)',
-            hintText: 'Why, or what to do instead',
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Deny')),
-        ],
-      ),
+      builder: (_) => const _DenyDialog(),
     );
-    if (confirmed ?? false) {
-      onDecide(false, controller.text.trim());
-    }
-    controller.dispose();
+    if (reason != null) onDecide(false, reason);
   }
 
   @override
@@ -402,6 +382,50 @@ class _ApprovalCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Deny-reason dialog that owns its controller (avoids "used after disposed" on pop).
+/// Returns the trimmed reason (may be empty), or null when cancelled.
+class _DenyDialog extends StatefulWidget {
+  const _DenyDialog();
+
+  @override
+  State<_DenyDialog> createState() => _DenyDialogState();
+}
+
+class _DenyDialogState extends State<_DenyDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Deny tool'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'Reason (optional)',
+          hintText: 'Why, or what to do instead',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('Deny'),
+        ),
+      ],
     );
   }
 }

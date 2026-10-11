@@ -21,31 +21,13 @@ class ReviewPage extends ConsumerWidget {
     final actions = ref.read(gitActionsProvider(taskId).notifier);
     final suggested = await actions.suggestMessage().catchError((_) => '');
     if (!context.mounted) return;
-    final controller = TextEditingController(text: suggested);
-    final ok = await showDialog<bool>(
+    // The dialog owns its TextEditingController (disposes it in its own State), so it is never
+    // used after disposal during the dialog's pop animation.
+    final message = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Commit changes'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          minLines: 1,
-          maxLines: 3,
-          decoration: const InputDecoration(labelText: 'Commit message'),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Commit')),
-        ],
-      ),
+      builder: (_) => _CommitDialog(initial: suggested),
     );
-    final message = controller.text.trim();
-    controller.dispose();
-    if (!(ok ?? false)) return;
+    if (message == null) return; // cancelled
     await _run(context, ref, () async {
       final sha = await actions.commit(message);
       return 'Committed ${sha.substring(0, sha.length < 7 ? sha.length : 7)}';
@@ -282,6 +264,53 @@ class _StatusBadge extends StatelessWidget {
       radius: 12,
       backgroundColor: color.withValues(alpha: 0.15),
       child: Text(letter, style: context.text.regular12.copyWith(color: color)),
+    );
+  }
+}
+
+/// Commit-message dialog that owns its controller, so the text field is never used after
+/// the controller is disposed (fixes the "used after being disposed" crash during pop).
+/// Returns the trimmed message, or null when cancelled.
+class _CommitDialog extends StatefulWidget {
+  const _CommitDialog({required this.initial});
+
+  final String initial;
+
+  @override
+  State<_CommitDialog> createState() => _CommitDialogState();
+}
+
+class _CommitDialogState extends State<_CommitDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Commit changes'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        minLines: 1,
+        maxLines: 3,
+        decoration: const InputDecoration(labelText: 'Commit message'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('Commit'),
+        ),
+      ],
     );
   }
 }
