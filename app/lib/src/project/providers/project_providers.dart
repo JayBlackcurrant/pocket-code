@@ -3,9 +3,21 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/extension/future.dart';
 import '../../../core/instances/api_client.dart';
 import '../../review/models/file_content.dart';
+import '../../tasks/models/task_detail.dart';
 import '../models/tree_entry.dart';
 
 part 'project_providers.g.dart';
+
+/// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
+@riverpod
+Future<List<TaskDetail>> projectTasks(Ref ref, String projectId) async {
+  final dio = ref.watch(apiProvider);
+  final res = await dio.get<dynamic>('/projects/$projectId/tasks').guard();
+  return (res.data['tasks'] as List)
+      .cast<Map<String, dynamic>>()
+      .map(TaskDetail.fromJson)
+      .toList();
+}
 
 /// List one directory of a project (GET /projects/:id/tree?path=).
 @riverpod

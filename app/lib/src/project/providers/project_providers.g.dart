@@ -8,6 +8,91 @@ part of 'project_providers.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
+/// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
+
+@ProviderFor(projectTasks)
+const projectTasksProvider = ProjectTasksFamily._();
+
+/// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
+
+final class ProjectTasksProvider extends $FunctionalProvider<
+        AsyncValue<List<TaskDetail>>,
+        List<TaskDetail>,
+        FutureOr<List<TaskDetail>>>
+    with $FutureModifier<List<TaskDetail>>, $FutureProvider<List<TaskDetail>> {
+  /// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
+  const ProjectTasksProvider._(
+      {required ProjectTasksFamily super.from, required String super.argument})
+      : super(
+          retry: null,
+          name: r'projectTasksProvider',
+          isAutoDispose: true,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$projectTasksHash();
+
+  @override
+  String toString() {
+    return r'projectTasksProvider'
+        ''
+        '($argument)';
+  }
+
+  @$internal
+  @override
+  $FutureProviderElement<List<TaskDetail>> $createElement(
+          $ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<List<TaskDetail>> create(Ref ref) {
+    final argument = this.argument as String;
+    return projectTasks(
+      ref,
+      argument,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ProjectTasksProvider && other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$projectTasksHash() => r'2357cb4b4691561d0f1bb0769bb981d388b64def';
+
+/// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
+
+final class ProjectTasksFamily extends $Family
+    with $FunctionalFamilyOverride<FutureOr<List<TaskDetail>>, String> {
+  const ProjectTasksFamily._()
+      : super(
+          retry: null,
+          name: r'projectTasksProvider',
+          dependencies: null,
+          $allTransitiveDependencies: null,
+          isAutoDispose: true,
+        );
+
+  /// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
+
+  ProjectTasksProvider call(
+    String projectId,
+  ) =>
+      ProjectTasksProvider._(argument: projectId, from: this);
+
+  @override
+  String toString() => r'projectTasksProvider';
+}
+
 /// List one directory of a project (GET /projects/:id/tree?path=).
 
 @ProviderFor(projectTree)

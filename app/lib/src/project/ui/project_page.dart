@@ -4,12 +4,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
 import '../../routes/app_router.dart';
+import '../../tasks/models/task_detail.dart';
 import '../../tasks/providers/new_task_controller.dart';
 import '../mention.dart';
 import '../models/tree_entry.dart';
 import '../providers/project_providers.dart';
 
-/// Browse a project's files and start a task with an attached-file prompt.
+/// Model choices for the composer. null = let the daemon / Claude Code pick its default.
+const Map<String, String?> _kModels = {
+  'Default model': null,
+  'Opus': 'opus',
+  'Sonnet': 'sonnet',
+  'Haiku': 'haiku',
+};
+
+/// A project's recent tasks + file browser, with a composer to start a new task.
 @RoutePage()
 class ProjectPage extends ConsumerStatefulWidget {
   const ProjectPage(
@@ -27,6 +36,8 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
   String _dir = ''; // current directory, relative to repo root
   final List<String> _attachments = [];
   ActiveMention? _mention; // active @mention the cursor is in, if any
+  int _tab = 0; // 0 = Tasks, 1 = Files
+  String? _model; // null = default model
 
   @override
   void initState() {
@@ -90,14 +101,17 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
         : 'Please consider these files:\n${_attachments.map((p) => '- $p').join('\n')}\n\n$msg';
     final started = await ref
         .read(newTaskControllerProvider.notifier)
-        .create(widget.projectId, prompt, title: msg);
+        .create(widget.projectId, prompt, title: msg, model: _model);
     if (!mounted || started == null) return;
+    _prompt.clear();
+    setState(() => _attachments.clear());
+    ref.invalidate(
+        projectTasksProvider(widget.projectId)); // show the new task on return
     await context.router.push(TaskRoute(taskId: started.taskId));
   }
 
   @override
   Widget build(BuildContext context) {
-    final tree = ref.watch(projectTreeProvider(widget.projectId, _dir));
     final creating = ref.watch(newTaskControllerProvider).isLoading;
     ref.listen(newTaskControllerProvider, (_, next) {
       if (next.hasError && mounted) {
@@ -110,28 +124,128 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
       appBar: AppBar(title: Text(widget.projectName)),
       body: Column(
         children: [
-          _breadcrumb(context),
+          _tabHeader(context),
           Expanded(
-            child: tree.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => ListView(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('$e', style: context.text.regular14),
-                  ),
-                ],
-              ),
-              data: (entries) => ListView.builder(
-                itemCount: entries.length,
-                itemBuilder: (_, i) => _entryTile(context, entries[i]),
-              ),
-            ),
-          ),
+              child: _tab == 0 ? _tasksView(context) : _filesView(context)),
           if (_mention != null) _suggestions(context),
           _composer(context, creating),
         ],
       ),
+    );
+  }
+
+  Widget _tabHeader(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: SegmentedButton<int>(
+        segments: const [
+          ButtonSegment(
+              value: 0,
+              label: Text('Tasks'),
+              icon: Icon(Icons.list_alt, size: 18)),
+          ButtonSegment(
+              value: 1,
+              label: Text('Files'),
+              icon: Icon(Icons.folder_outlined, size: 18)),
+        ],
+        selected: {_tab},
+        onSelectionChanged: (s) => setState(() => _tab = s.first),
+        showSelectedIcon: false,
+      ),
+    );
+  }
+
+  Widget _tasksView(BuildContext context) {
+    final tasks = ref.watch(projectTasksProvider(widget.projectId));
+    return RefreshIndicator(
+      onRefresh: () async =>
+          ref.invalidate(projectTasksProvider(widget.projectId)),
+      child: tasks.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ListView(children: [
+          Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text('$e', style: context.text.regular14)),
+        ]),
+        data: (list) {
+          if (list.isEmpty) {
+            return ListView(children: [
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('No tasks yet — start one below.',
+                    style: context.text.regular14
+                        .copyWith(color: context.colors.muted)),
+              ),
+            ]);
+          }
+          return ListView.separated(
+            itemCount: list.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) => _taskTile(context, list[i]),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _taskTile(BuildContext context, TaskDetail t) {
+    final color = switch (t.status) {
+      'done' => context.colors.green,
+      'failed' || 'cancelled' || 'discarded' => context.colors.red,
+      'running' || 'queued' || 'waiting' => context.colors.primary,
+      _ => context.colors.muted,
+    };
+    final branch =
+        t.branch.isEmpty ? t.id : t.branch.replaceFirst('claude/', '');
+    return ListTile(
+      dense: true,
+      leading: Icon(Icons.commit, size: 20, color: color),
+      title: Text(branch,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: context.text.regular14),
+      subtitle: Text(
+        t.costUsd != null
+            ? '${t.status} · \$${t.costUsd!.toStringAsFixed(4)}'
+            : t.status,
+        style: context.text.regular12.copyWith(color: context.colors.muted),
+      ),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(t.status,
+            style: context.text.regular12.copyWith(color: color)),
+      ),
+      onTap: () => context.router.push(TaskRoute(taskId: t.id)),
+    );
+  }
+
+  Widget _filesView(BuildContext context) {
+    final tree = ref.watch(projectTreeProvider(widget.projectId, _dir));
+    return Column(
+      children: [
+        _breadcrumb(context),
+        Expanded(
+          child: tree.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ListView(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('$e', style: context.text.regular14),
+                ),
+              ],
+            ),
+            data: (entries) => ListView.builder(
+              itemCount: entries.length,
+              itemBuilder: (_, i) => _entryTile(context, entries[i]),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -243,6 +357,24 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Row(
+              children: [
+                Icon(Icons.memory, size: 16, color: context.colors.muted),
+                const SizedBox(width: 6),
+                DropdownButton<String?>(
+                  value: _model,
+                  isDense: true,
+                  underline: const SizedBox.shrink(),
+                  style: context.text.regular12,
+                  items: [
+                    for (final e in _kModels.entries)
+                      DropdownMenuItem(value: e.value, child: Text(e.key)),
+                  ],
+                  onChanged: busy ? null : (v) => setState(() => _model = v),
+                ),
+                const Spacer(),
+              ],
+            ),
             if (_attachments.isNotEmpty)
               Align(
                 alignment: Alignment.centerLeft,

@@ -261,6 +261,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   );
 
+  // Recent tasks for a project, newest first (project screen's task list).
+  app.get<{ Params: { id: string } }>('/projects/:id/tasks', auth, async (req, reply) => {
+    const project = deps.registry.get(req.params.id);
+    if (!project) return reply.code(404).send({ error: 'unknown project' });
+    return { tasks: deps.tasks.listForProject(req.params.id) };
+  });
+
   // Create and start a task on a project (S1-05).
   app.post<{ Params: { id: string } }>('/projects/:id/tasks', auth, async (req, reply) => {
     const parsed = CreateTaskBody.safeParse(req.body);

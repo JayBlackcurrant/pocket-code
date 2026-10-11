@@ -90,4 +90,13 @@ export class TaskStore {
     const rows = this.db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as RawTaskRow[];
     return rows.map(toTask);
   }
+
+  /** Tasks for one project, newest first (for the project screen's recent-tasks list).
+   *  rowid tie-breaks tasks created in the same millisecond, so order is deterministic. */
+  listForProject(projectId: string, limit = 50): TaskRow[] {
+    const rows = this.db
+      .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
+      .all(projectId, limit) as RawTaskRow[];
+    return rows.map(toTask);
+  }
 }

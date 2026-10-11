@@ -80,6 +80,18 @@
 
 ## Log
 
+### 2026-10-11 — project screen: recent tasks tab + model picker (UX #1)
+- Project screen reshaped into **Tasks | Files** tabs (SegmentedButton). **Tasks** is the
+  default: recent tasks from new `GET /projects/:id/tasks` (`projectTasks` provider), newest
+  first, status chip + branch + cost, tap → `TaskRoute`, pull-to-refresh. **Files** holds the
+  existing browser (breadcrumb + tree). Composer stays at the bottom on both.
+- **Model picker** folded into the composer (Default / Opus / Sonnet / Haiku) → passed as
+  `model` to `POST /projects/:id/tasks` (daemon already accepted it). On send, the task list
+  refreshes so the new task shows on return; prompt + attachments clear.
+- Daemon: `TaskStore.listForProject` (rowid tie-break) + `GET /projects/:id/tasks`.
+- **Tested:** daemon typecheck clean, 171 tests (+2 listForProject); app analyze clean, 41
+  tests, build bundle compiles. (On hold still: continue-on-branch, mode/branch pickers.)
+
 ### 2026-10-11 — review → commit → build gating (app)
 Build is now only offered after the task's changes are committed.
 - New `review/providers/review_status.dart` → `GET /tasks/:id/review-status`
