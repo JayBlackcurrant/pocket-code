@@ -18,8 +18,10 @@ class ReviewPage extends ConsumerWidget {
   final String taskId;
 
   Future<void> _commit(BuildContext context, WidgetRef ref) async {
-    final actions = ref.read(gitActionsProvider(taskId).notifier);
-    final suggested = await actions.suggestMessage().catchError((_) => '');
+    final suggested = await ref
+        .read(gitActionsProvider(taskId).notifier)
+        .suggestMessage()
+        .catchError((_) => '');
     if (!context.mounted) return;
     // The dialog owns its TextEditingController (disposes it in its own State), so it is never
     // used after disposal during the dialog's pop animation.
@@ -29,7 +31,8 @@ class ReviewPage extends ConsumerWidget {
     );
     if (message == null) return; // cancelled
     await _run(context, ref, () async {
-      final sha = await actions.commit(message);
+      final sha =
+          await ref.read(gitActionsProvider(taskId).notifier).commit(message);
       return 'Committed ${sha.substring(0, sha.length < 7 ? sha.length : 7)}';
     });
   }

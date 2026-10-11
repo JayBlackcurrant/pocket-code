@@ -6,7 +6,11 @@ import '../../../core/instances/api_client.dart';
 part 'git_actions.g.dart';
 
 /// Git actions for a task (S2-09): commit, revert, push, discard.
-@riverpod
+///
+/// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+/// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+/// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
+@Riverpod(keepAlive: true)
 class GitActions extends _$GitActions {
   late String _taskId;
 

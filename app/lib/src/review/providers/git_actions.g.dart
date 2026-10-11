@@ -9,19 +9,31 @@ part of 'git_actions.dart';
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
 /// Git actions for a task (S2-09): commit, revert, push, discard.
+///
+/// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+/// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+/// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
 
 @ProviderFor(GitActions)
 const gitActionsProvider = GitActionsFamily._();
 
 /// Git actions for a task (S2-09): commit, revert, push, discard.
+///
+/// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+/// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+/// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
 final class GitActionsProvider extends $NotifierProvider<GitActions, void> {
   /// Git actions for a task (S2-09): commit, revert, push, discard.
+  ///
+  /// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+  /// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+  /// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
   const GitActionsProvider._(
       {required GitActionsFamily super.from, required String super.argument})
       : super(
           retry: null,
           name: r'gitActionsProvider',
-          isAutoDispose: true,
+          isAutoDispose: false,
           dependencies: null,
           $allTransitiveDependencies: null,
         );
@@ -59,9 +71,13 @@ final class GitActionsProvider extends $NotifierProvider<GitActions, void> {
   }
 }
 
-String _$gitActionsHash() => r'7c1e9471844e37589dd2d482428037f2afab11cf';
+String _$gitActionsHash() => r'6a4123cfb1056cc0e9d3ffc2c8a4c4a633ec459c';
 
 /// Git actions for a task (S2-09): commit, revert, push, discard.
+///
+/// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+/// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+/// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
 
 final class GitActionsFamily extends $Family
     with $ClassFamilyOverride<GitActions, void, void, void, String> {
@@ -71,10 +87,14 @@ final class GitActionsFamily extends $Family
           name: r'gitActionsProvider',
           dependencies: null,
           $allTransitiveDependencies: null,
-          isAutoDispose: true,
+          isAutoDispose: false,
         );
 
   /// Git actions for a task (S2-09): commit, revert, push, discard.
+  ///
+  /// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+  /// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+  /// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
 
   GitActionsProvider call(
     String taskId,
@@ -86,6 +106,10 @@ final class GitActionsFamily extends $Family
 }
 
 /// Git actions for a task (S2-09): commit, revert, push, discard.
+///
+/// keepAlive so the notifier's `ref` stays valid across async gaps (e.g. while a commit
+/// dialog is open). As an autoDispose provider it was torn down between a `.read().notifier`
+/// and a later method call — then `ref.read(apiProvider)` hit a disposed ref.
 
 abstract class _$GitActions extends $Notifier<void> {
   late final _$args = ref.$arg as String;

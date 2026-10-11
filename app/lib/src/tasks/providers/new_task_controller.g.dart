@@ -36,7 +36,7 @@ final class NewTaskControllerProvider
   NewTaskController create() => NewTaskController();
 }
 
-String _$newTaskControllerHash() => r'3b90f80c5497aef0c0e872a03a517dab4b11d6a4';
+String _$newTaskControllerHash() => r'440ce1db2d1f7c4a4a67b441389a80f511f8ecf1';
 
 /// Creates and starts a task on a project (POST /projects/:id/tasks).
 
