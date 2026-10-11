@@ -129,6 +129,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   });
   const auth = { preHandler: requireAuth(deps.db) };
+
+  // Tolerate an empty body on POSTs that take no (or optional) JSON. The phone's HTTP client
+  // sends `Content-Type: application/json` even with no body (push/discard/cancel/retry), which
+  // Fastify's default parser rejects with FST_ERR_CTP_EMPTY_JSON_BODY (400). Treat empty as {}.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    const text = (body as string).trim();
+    if (text === '') {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(text));
+    } catch (err) {
+      (err as { statusCode?: number }).statusCode = 400;
+      done(err as Error, undefined);
+    }
+  });
+
   // Must finish registering before the websocket route is defined, otherwise its
   // onRoute hook misses the route and `{ websocket: true }` is silently ignored.
   await app.register(fastifyWebsocket);

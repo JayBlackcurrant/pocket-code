@@ -76,6 +76,14 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-11 — accept empty JSON body on body-less POSTs (fix push/cancel 400) — dev side
+Push/discard/cancel/retry failed with **400 FST_ERR_CTP_EMPTY_JSON_BODY**: the phone sends
+`Content-Type: application/json` even with no body, and Fastify's default parser rejects an
+empty body. Added a content-type parser that treats an empty body as `{}` (invalid JSON still
+400s). Fixes all body-less POSTs at once. **Tested:** typecheck clean, **169 tests** (+1:
+`POST /tasks/:id/cancel` with an empty JSON body reaches the handler → 404, not 400).
+`git pull` + restart to pick it up.
+
 ### 2026-10-11 — short, sensible branch names — dev side
 Branches like `claude/please-consider-these-files-lib-src-ange` came from slugifying the whole
 folded prompt. Fixes:

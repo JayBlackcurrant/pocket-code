@@ -90,14 +90,12 @@ class ReviewPage extends ConsumerWidget {
       Future<String> Function() action) async {
     try {
       final msg = await action();
+      // The widget (and its ref) may be gone after the await — only touch them if mounted.
+      if (!context.mounted) return;
       ref.invalidate(diffSummaryProvider(taskId));
       ref.invalidate(taskReviewStatusProvider(
           taskId)); // commit/revert may unlock the build
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg)));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context)

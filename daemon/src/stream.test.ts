@@ -227,6 +227,20 @@ afterEach(async () => {
   db.close();
 });
 
+describe('empty JSON body on a body-less POST', () => {
+  it('is accepted (no FST_ERR_CTP_EMPTY_JSON_BODY) — reaches the handler', async () => {
+    // The phone sends application/json with no body on push/cancel/etc. Previously 400.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/tasks/nope/cancel',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: '',
+    });
+    // Reaches the handler: unknown task -> 404 (NOT a 400 empty-body parser error).
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe('WS /tasks/:id/stream', () => {
   it('replays only events after `since`', async () => {
     runner = new AgentRunner({
