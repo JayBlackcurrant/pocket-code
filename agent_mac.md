@@ -76,6 +76,16 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-11 — composer: permission-mode + base-branch pickers (UX #4) — dev side
+- Task create now accepts `permissionMode` (default/acceptEdits/plan; **never** bypass) and
+  `baseRef` (branch to fork from, default git.base). `StartTaskInput` + `runAgent` thread the
+  mode into `options.permissionMode`; `start` forks from `baseRef ?? git.base`.
+- New `GET /projects/:id/branches` → `{ base, branches }` (`GitService.listBranches`, excludes
+  `claude/*`). App composer gained **mode** + **branch** dropdowns next to the model picker.
+- **Tested:** daemon typecheck clean, **176 tests** (+2: permission mode reaches the query;
+  listBranches excludes claude/*). App analyze clean, 41 tests, build bundle compiles.
+  (#3 — file browser as a tab — was already shipped with #1.) `git pull` + restart.
+
 ### 2026-10-11 — Review shows a task's changes reliably (branch-aware diff) — dev side
 Review could show "No changes" though the task changed files: the single-checkout model means
 the diff was always working-tree-vs-base, so it was wrong/empty whenever the task's branch

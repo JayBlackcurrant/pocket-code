@@ -83,6 +83,9 @@ const CreateTaskBody = z.object({
   taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(),
   // Short branch title (the user's message), so the branch isn't named from a folded prompt.
   title: z.string().min(1).max(200).optional(),
+  // Branch to fork from (default: project base). Permission mode for the run (never bypass).
+  baseRef: z.string().min(1).max(200).optional(),
+  permissionMode: z.enum(['default', 'acceptEdits', 'plan']).optional(),
 });
 
 const ContinueTaskBody = z.object({
@@ -266,6 +269,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     },
   );
 
+  // Branches to fork a new task from (base picker). Default is the project's git.base.
+  app.get<{ Params: { id: string } }>('/projects/:id/branches', auth, async (req, reply) => {
+    const project = deps.registry.getActive(req.params.id);
+    if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+    try {
+      const branches = await deps.git.listBranches(project.resolvedPath);
+      return { base: project.manifest.git.base, branches };
+    } catch (err) {
+      if (err instanceof GitError) return reply.code(500).send({ error: err.message });
+      throw err;
+    }
+  });
+
   // Recent tasks for a project, newest first (project screen's task list).
   app.get<{ Params: { id: string } }>('/projects/:id/tasks', auth, async (req, reply) => {
     const project = deps.registry.get(req.params.id);
@@ -291,6 +307,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
         ...(parsed.data.taskId !== undefined ? { taskId: parsed.data.taskId } : {}),
         ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
+        ...(parsed.data.baseRef !== undefined ? { baseRef: parsed.data.baseRef } : {}),
+        ...(parsed.data.permissionMode !== undefined ? { permissionMode: parsed.data.permissionMode } : {}),
       });
       return reply.code(201).send(started);
     } catch (err) {

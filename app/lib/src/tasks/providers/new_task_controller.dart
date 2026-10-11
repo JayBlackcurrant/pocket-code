@@ -17,6 +17,8 @@ class NewTaskController extends _$NewTaskController {
     String prompt, {
     String? title,
     String? model,
+    String? baseRef,
+    String? permissionMode,
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
@@ -28,6 +30,9 @@ class NewTaskController extends _$NewTaskController {
           // Name the branch from the user's message, not the folded "consider these files" prompt.
           if (title != null && title.isNotEmpty) 'title': title,
           if (model != null && model.isNotEmpty) 'model': model,
+          if (baseRef != null && baseRef.isNotEmpty) 'baseRef': baseRef,
+          if (permissionMode != null && permissionMode.isNotEmpty)
+            'permissionMode': permissionMode,
         },
       ).guard();
       return StartedTask.fromJson(res.data as Map<String, dynamic>);

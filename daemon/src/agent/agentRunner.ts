@@ -90,6 +90,10 @@ export interface StartTaskInput {
   /** Short human title used to name the branch (falls back to the prompt). Lets the app name
    *  the branch from the user's message, not a folded "consider these files…" prompt. */
   title?: string;
+  /** Branch to fork the task from. Defaults to the manifest's git.base (e.g. stag). */
+  baseRef?: string;
+  /** Per-task permission mode (default / acceptEdits / plan). Never bypassPermissions. */
+  permissionMode?: PermissionMode;
 }
 
 export interface StartedTask {
@@ -227,7 +231,7 @@ export class AgentRunner {
     try {
       worktree = await this.git.createTaskBranch(project.resolvedPath, {
         taskId,
-        baseRef: manifest.git.base,
+        baseRef: input.baseRef ?? manifest.git.base,
         name: input.title ?? input.prompt,
       });
     } catch (err) {
@@ -325,10 +329,15 @@ export class AgentRunner {
     resume?: string,
   ): Promise<void> {
     const abort = new AbortController();
+    // Per-task mode overrides the default, but bypassPermissions is never allowed (CLAUDE.md).
+    const mode: PermissionMode =
+      input.permissionMode && input.permissionMode !== 'bypassPermissions'
+        ? input.permissionMode
+        : this.defaultPermissionMode;
     const options: Options = {
       cwd,
       abortController: abort,
-      permissionMode: this.defaultPermissionMode,
+      permissionMode: mode,
       // Resume the task's prior Claude session so it keeps its context (continue a task).
       ...(resume !== undefined ? { resume } : {}),
       // Permission rules (S2-02) run first: dangerous tools are denied and never run,

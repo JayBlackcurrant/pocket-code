@@ -8,6 +8,19 @@ import '../models/tree_entry.dart';
 
 part 'project_providers.g.dart';
 
+/// Base branches to fork a new task from (GET /projects/:id/branches).
+@riverpod
+Future<({String base, List<String> branches})> projectBranches(
+    Ref ref, String projectId) async {
+  final dio = ref.watch(apiProvider);
+  final res = await dio.get<dynamic>('/projects/$projectId/branches').guard();
+  final data = res.data as Map<String, dynamic>;
+  return (
+    base: (data['base'] ?? '') as String,
+    branches: (data['branches'] as List).cast<String>(),
+  );
+}
+
 /// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
 @riverpod
 Future<List<TaskDetail>> projectTasks(Ref ref, String projectId) async {

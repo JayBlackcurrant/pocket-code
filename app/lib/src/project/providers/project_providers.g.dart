@@ -8,6 +8,128 @@ part of 'project_providers.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
+/// Base branches to fork a new task from (GET /projects/:id/branches).
+
+@ProviderFor(projectBranches)
+const projectBranchesProvider = ProjectBranchesFamily._();
+
+/// Base branches to fork a new task from (GET /projects/:id/branches).
+
+final class ProjectBranchesProvider extends $FunctionalProvider<
+        AsyncValue<
+            ({
+              String base,
+              List<String> branches,
+            })>,
+        ({
+          String base,
+          List<String> branches,
+        }),
+        FutureOr<
+            ({
+              String base,
+              List<String> branches,
+            })>>
+    with
+        $FutureModifier<
+            ({
+              String base,
+              List<String> branches,
+            })>,
+        $FutureProvider<
+            ({
+              String base,
+              List<String> branches,
+            })> {
+  /// Base branches to fork a new task from (GET /projects/:id/branches).
+  const ProjectBranchesProvider._(
+      {required ProjectBranchesFamily super.from,
+      required String super.argument})
+      : super(
+          retry: null,
+          name: r'projectBranchesProvider',
+          isAutoDispose: true,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$projectBranchesHash();
+
+  @override
+  String toString() {
+    return r'projectBranchesProvider'
+        ''
+        '($argument)';
+  }
+
+  @$internal
+  @override
+  $FutureProviderElement<
+      ({
+        String base,
+        List<String> branches,
+      })> $createElement(
+          $ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<
+      ({
+        String base,
+        List<String> branches,
+      })> create(Ref ref) {
+    final argument = this.argument as String;
+    return projectBranches(
+      ref,
+      argument,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ProjectBranchesProvider && other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$projectBranchesHash() => r'849dc566b211624e52c39360f80b23b54b3aed57';
+
+/// Base branches to fork a new task from (GET /projects/:id/branches).
+
+final class ProjectBranchesFamily extends $Family
+    with
+        $FunctionalFamilyOverride<
+            FutureOr<
+                ({
+                  String base,
+                  List<String> branches,
+                })>,
+            String> {
+  const ProjectBranchesFamily._()
+      : super(
+          retry: null,
+          name: r'projectBranchesProvider',
+          dependencies: null,
+          $allTransitiveDependencies: null,
+          isAutoDispose: true,
+        );
+
+  /// Base branches to fork a new task from (GET /projects/:id/branches).
+
+  ProjectBranchesProvider call(
+    String projectId,
+  ) =>
+      ProjectBranchesProvider._(argument: projectId, from: this);
+
+  @override
+  String toString() => r'projectBranchesProvider';
+}
+
 /// Recent tasks for a project (GET /projects/:id/tasks), newest-first.
 
 @ProviderFor(projectTasks)

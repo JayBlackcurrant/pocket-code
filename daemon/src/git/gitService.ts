@@ -118,6 +118,15 @@ export class GitService {
     return (await this.git(repoPath, ['status', '--porcelain'])).trim() === '';
   }
 
+  /** Local branch names for the base picker, excluding per-task `claude/*` branches. */
+  async listBranches(repoPath: string): Promise<string[]> {
+    const out = await this.git(repoPath, ['branch', '--format=%(refname:short)']);
+    return out
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !s.startsWith('claude/'));
+  }
+
   /** Number of commits `branch` is ahead of `baseRef` (committed, reviewable work). */
   async commitsAhead(repoPath: string, baseRef: string, branch: string): Promise<number> {
     const base = await this.resolveBaseRef(repoPath, baseRef);

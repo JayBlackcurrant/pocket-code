@@ -117,6 +117,13 @@ describe('GitService', () => {
     expect(await svc.commitsAhead(repo, 'stag', wt.branch)).toBe(1);
   });
 
+  it('lists base branches, excluding per-task claude/* branches', async () => {
+    await svc.createTaskBranch(repo, { taskId: 'lb', name: 'listed', baseRef: 'stag' });
+    const branches = await svc.listBranches(repo);
+    expect(branches).toContain('stag');
+    expect(branches.some((b) => b.startsWith('claude/'))).toBe(false);
+  });
+
   it('refuses to start a task on a dirty working tree', async () => {
     writeFileSync(join(repo, 'dirty.txt'), 'x\n');
     await expect(

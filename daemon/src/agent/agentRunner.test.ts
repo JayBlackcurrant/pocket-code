@@ -190,6 +190,24 @@ describe('AgentRunner', () => {
     expect(events.since(started.taskId, 0).map((e) => e.type)).toContain('task.resumed');
   });
 
+  it('passes the per-task permission mode to the query (#4)', async () => {
+    let seenMode: string | undefined;
+    const query: QueryFn = ({ options }) => {
+      seenMode = options?.permissionMode;
+      const gen = (async function* () {
+        yield sysInit;
+        yield resultOk;
+      })();
+      const q = gen as unknown as Query;
+      (q as unknown as { interrupt: () => Promise<void> }).interrupt = async () => undefined;
+      return q;
+    };
+    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query });
+    const started = await runner.start({ projectId: 'hedged', prompt: 'plan it', permissionMode: 'plan' });
+    await runner.whenSettled(started.taskId);
+    expect(seenMode).toBe('plan');
+  });
+
   it('refuses to continue a task with no session', async () => {
     tasks.create({ id: 'nosess', projectId: 'hedged', branch: 'claude/x', worktree: repo });
     const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: fakeQuery([]) });

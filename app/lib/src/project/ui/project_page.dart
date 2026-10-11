@@ -18,6 +18,13 @@ const Map<String, String?> _kModels = {
   'Haiku': 'haiku',
 };
 
+/// Permission-mode choices (like Claude Code). Values map to the agent SDK modes.
+const Map<String, String> _kModes = {
+  'Auto-accept edits': 'acceptEdits',
+  'Ask each tool': 'default',
+  'Plan first': 'plan',
+};
+
 /// A project's recent tasks + file browser, with a composer to start a new task.
 @RoutePage()
 class ProjectPage extends ConsumerStatefulWidget {
@@ -38,6 +45,8 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
   ActiveMention? _mention; // active @mention the cursor is in, if any
   int _tab = 0; // 0 = Tasks, 1 = Files
   String? _model; // null = default model
+  String _mode = 'acceptEdits'; // permission mode for the new task
+  String? _baseRef; // null = project base branch
 
   @override
   void initState() {
@@ -99,9 +108,14 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
     final prompt = _attachments.isEmpty
         ? msg
         : 'Please consider these files:\n${_attachments.map((p) => '- $p').join('\n')}\n\n$msg';
-    final started = await ref
-        .read(newTaskControllerProvider.notifier)
-        .create(widget.projectId, prompt, title: msg, model: _model);
+    final started = await ref.read(newTaskControllerProvider.notifier).create(
+          widget.projectId,
+          prompt,
+          title: msg,
+          model: _model,
+          baseRef: _baseRef,
+          permissionMode: _mode,
+        );
     if (!mounted || started == null) return;
     _prompt.clear();
     setState(() => _attachments.clear());
@@ -344,6 +358,79 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
     );
   }
 
+  // Model · permission mode · base branch pickers (like Claude Code).
+  Widget _optionsRow(BuildContext context, bool busy) {
+    final branches = ref.watch(projectBranchesProvider(widget.projectId));
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 2,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _iconDropdown<String?>(
+            context,
+            Icons.memory,
+            _model,
+            [
+              for (final e in _kModels.entries)
+                DropdownMenuItem(value: e.value, child: Text(e.key))
+            ],
+            busy ? null : (v) => setState(() => _model = v),
+          ),
+          _iconDropdown<String>(
+            context,
+            Icons.tune,
+            _mode,
+            [
+              for (final e in _kModes.entries)
+                DropdownMenuItem(value: e.value, child: Text(e.key))
+            ],
+            busy ? null : (v) => setState(() => _mode = v!),
+          ),
+          branches.maybeWhen(
+            data: (b) => _iconDropdown<String?>(
+              context,
+              Icons.call_split,
+              _baseRef,
+              [
+                DropdownMenuItem(value: null, child: Text('base: ${b.base}')),
+                for (final name in b.branches.where((n) => n != b.base))
+                  DropdownMenuItem(value: name, child: Text(name)),
+              ],
+              busy ? null : (v) => setState(() => _baseRef = v),
+            ),
+            orElse: () => const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _iconDropdown<T>(
+    BuildContext context,
+    IconData icon,
+    T value,
+    List<DropdownMenuItem<T>> items,
+    void Function(T?)? onChanged,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: context.colors.muted),
+        const SizedBox(width: 4),
+        DropdownButton<T>(
+          value: value,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          style: context.text.regular12,
+          items: items,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+
   Widget _composer(BuildContext context, bool busy) {
     return SafeArea(
       top: false,
@@ -356,24 +443,7 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Icon(Icons.memory, size: 16, color: context.colors.muted),
-                const SizedBox(width: 6),
-                DropdownButton<String?>(
-                  value: _model,
-                  isDense: true,
-                  underline: const SizedBox.shrink(),
-                  style: context.text.regular12,
-                  items: [
-                    for (final e in _kModels.entries)
-                      DropdownMenuItem(value: e.value, child: Text(e.key)),
-                  ],
-                  onChanged: busy ? null : (v) => setState(() => _model = v),
-                ),
-                const Spacer(),
-              ],
-            ),
+            _optionsRow(context, busy),
             if (_attachments.isNotEmpty)
               Align(
                 alignment: Alignment.centerLeft,
