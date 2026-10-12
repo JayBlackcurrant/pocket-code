@@ -35,6 +35,7 @@ void main() {
     expect(statusFromEvent('task.completed', {'status': 'done'}), 'done');
     expect(statusFromEvent('task.cancelled', null), 'cancelled');
     expect(statusFromEvent('task.error', null), 'failed');
+    expect(statusFromEvent('task.interrupted', {'resumable': true}), 'failed');
     expect(statusFromEvent('agent.assistant', null), isNull);
   });
 

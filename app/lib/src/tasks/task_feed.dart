@@ -31,6 +31,8 @@ String? statusFromEvent(String type, dynamic payload) {
       return 'cancelled';
     case 'task.error':
       return 'failed';
+    case 'task.interrupted':
+      return 'failed';
     default:
       return null;
   }
@@ -75,6 +77,17 @@ List<FeedItem> mapEventToItems(int seq, String type, dynamic payload) {
       return [
         FeedItem(
             seq: seq, kind: FeedKind.lifecycle, title: 'Task resumed', body: p)
+      ];
+    case 'task.interrupted':
+      final resumable = payload is Map && payload['resumable'] == true;
+      return [
+        FeedItem(
+          seq: seq,
+          kind: FeedKind.error,
+          title: 'Task interrupted (daemon restarted)',
+          body:
+              resumable ? 'Continue below to resume where it left off.' : null,
+        )
       ];
     case 'task.error':
       final msg = payload is Map ? payload['message']?.toString() : null;

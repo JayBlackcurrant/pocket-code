@@ -169,6 +169,23 @@ export class AgentRunner {
     this.log = logger;
   }
 
+  /**
+   * Crash recovery (S4-02): on startup, mark tasks the daemon left non-terminal (a crash or
+   * restart killed their run loop) as failed, emitting `task.interrupted`. A task with a stored
+   * session id can be resumed from where it left off via continueTask. Returns how many were
+   * recovered. Call once at boot, before serving.
+   */
+  recoverInterrupted(): number {
+    const stuck = this.tasks.listUnfinished();
+    for (const t of stuck) {
+      const resumable = t.sessionId !== null;
+      this.tasks.setStatus(t.id, 'failed');
+      this.persist(t.id, 'task.interrupted', { resumable });
+      this.log.warn({ taskId: t.id, resumable }, 'recovered interrupted task');
+    }
+    return stuck.length;
+  }
+
   /** Resolve a pending tool permission from the phone (S2-01). */
   decidePermission(taskId: string, toolUseId: string, decision: Decision): boolean {
     return this.broker.decide(taskId, toolUseId, decision);

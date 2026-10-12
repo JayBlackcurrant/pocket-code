@@ -91,6 +91,15 @@ export class TaskStore {
     return rows.map(toTask);
   }
 
+  /** Tasks left in a non-terminal state (queued/running/waiting) — e.g. orphaned by a daemon
+   *  crash/restart, so startup recovery can fail + offer to resume them (S4-02). */
+  listUnfinished(): TaskRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM tasks WHERE status IN ('queued','running','waiting') ORDER BY created_at ASC")
+      .all() as RawTaskRow[];
+    return rows.map(toTask);
+  }
+
   /** Tasks for one project, newest first (for the project screen's recent-tasks list).
    *  rowid tie-breaks tasks created in the same millisecond, so order is deterministic. */
   listForProject(projectId: string, limit = 50): TaskRow[] {

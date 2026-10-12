@@ -190,6 +190,23 @@ describe('AgentRunner', () => {
     expect(events.since(started.taskId, 0).map((e) => e.type)).toContain('task.resumed');
   });
 
+  it('recovers interrupted tasks on startup, leaving terminal ones alone (S4-02)', async () => {
+    const runner = new AgentRunner({ registry, git: new GitService(), tasks, events, db, query: fakeQuery([]) });
+    // Simulate rows left behind by a crash + already-terminal rows.
+    tasks.create({ id: 'run1', projectId: 'hedged', branch: 'claude/a', worktree: repo, status: 'running' });
+    tasks.setSession('run1', 'sess-run1'); // resumable
+    tasks.create({ id: 'wait1', projectId: 'hedged', branch: 'claude/b', worktree: repo, status: 'waiting' });
+    tasks.create({ id: 'done1', projectId: 'hedged', branch: 'claude/c', worktree: repo, status: 'done' });
+
+    const n = runner.recoverInterrupted();
+    expect(n).toBe(2);
+    expect(tasks.get('run1')?.status).toBe('failed');
+    expect(tasks.get('wait1')?.status).toBe('failed');
+    expect(tasks.get('done1')?.status).toBe('done'); // untouched
+    const types = events.since('run1', 0).map((e) => e.type);
+    expect(types).toContain('task.interrupted');
+  });
+
   it('passes the per-task permission mode to the query (#4)', async () => {
     let seenMode: string | undefined;
     const query: QueryFn = ({ options }) => {

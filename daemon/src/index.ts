@@ -73,6 +73,11 @@ async function main(): Promise<void> {
   distribution.setLogger(app.log.child({ mod: 'build' }));
   releaseNotes.setLogger(app.log.child({ mod: 'build' }));
 
+  // Crash recovery (S4-02): fail any task left non-terminal by a previous crash/restart; they
+  // can be resumed from their stored session id.
+  const recovered = runner.recoverInterrupted();
+  if (recovered > 0) app.log.warn({ recovered }, 'marked interrupted tasks failed on startup');
+
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
     await app.close();

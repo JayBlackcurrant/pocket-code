@@ -78,6 +78,19 @@ tailscale serve status
 
 ## Log
 
+### 2026-10-12 — S4-02 crash recovery (fail interrupted tasks, offer resume) — dev side
+- On daemon startup, `AgentRunner.recoverInterrupted()` flips any task left non-terminal
+  (`queued`/`running`/`waiting` — orphaned by a crash/restart) to **failed**, emitting
+  `task.interrupted { resumable }`. Wired in `index.ts` after the loggers (logs the count).
+  `TaskStore.listUnfinished()` finds them. Terminal tasks are untouched.
+- **Resume** reuses the existing `continueTask` (POST /tasks/:id/continue): a recovered task with
+  a stored session id resumes where it left off via the app's "Continue this task…" composer.
+- App: `task.interrupted` → status **failed** + a feed line ("daemon restarted… continue below to
+  resume"). So the task list/stream no longer shows a stuck "running" after a restart.
+- **Tested:** daemon typecheck clean, **177 tests** (+1: running/waiting→failed, done untouched,
+  emits task.interrupted). App analyze clean, 41 tests, build bundle compiles. `git pull` + restart
+  (the restart itself now reconciles any orphaned tasks).
+
 ### 2026-10-12 — merged work to `main` + S4-01 LaunchAgent files — dev side
 - **Merged** `claude/in-place-task-branches` → `main` (fast-forward, 17 commits): the whole
   working line (Sprint 1–3, keyless distribution, in-place branches, review→commit→build gate,
