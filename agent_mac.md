@@ -28,7 +28,7 @@
 | Tailscale HTTPS exposure | ✅ `serve` active, **tailnet-only** (no public Funnel) |
 | Device pairing | ✅ paired & connected; re-paired 2026-10-10 after restarts |
 | Live agent task (end-to-end) | 🟡 first run hit a 400 (SDK bug); re-testing after the SDK upgrade |
-| Always-on service (S4-01 LaunchAgent) | ⬜ **not set up** — runs under `caffeinate` only; no reboot survival |
+| Always-on service (S4-01 LaunchAgent) | 🟡 **files ready** (`scripts/` + `AGENT_LAUNCHD.md`) — install on this Mac to get crash/reboot survival; not yet installed |
 | Daemon currently running? | ✅ **yes** — background under `caffeinate`, fresh with SDK 0.3.296 |
 
 ---
@@ -66,7 +66,9 @@ tailscale serve status
 - [ ] **App (dev side):** relabel 3 "Firebase" strings — `app/lib/src/builds/ui/builds_page.dart:474,477` ("Copy Firebase link" / console fallback) and `app/lib/src/builds/build_feed.dart:85` ("Uploading to Firebase…"). Cosmetic; the link already works.
 - [ ] Optional: set `RELAYD_DOWNLOAD_SECRET` in `env.sh` so download links stay valid across daemon restarts (else a fresh per-process secret invalidates old links on restart).
 - [ ] Full end-to-end (build→ship→install) still needs **Flutter/FVM on this Mac** to produce a real staging APK (not yet installed).
-- [ ] **S4-01** — LaunchAgent plist with `KeepAlive` for real reboot/crash survival (deferred; user chose "leave as-is for now" on 2026-10-09). Keeps biting pairing: when the daemon is stopped/rebooted nothing restarts it.
+- [ ] **S4-01** — **install** the LaunchAgent on this Mac: follow `AGENT_LAUNCHD.md` (copy the
+  plist to `~/Library/LaunchAgents`, `launchctl load -w`, enable auto-login for reboot). Files
+  are committed (`scripts/relayd-launchd.sh`, `scripts/com.pocketcode.relayd.plist`).
 - [ ] Confirm task worktrees land somewhere sensible (`RELAYD_WORKSPACES_DIR` is unset; verify a real task run creates a worktree inside the allowlist).
 - [ ] **S4-05 hardening:** `permissionRules` `git push` deny regex misses `git -C <path> push` — tighten it.
 - [ ] Confirm **S2-04 "Always allow"** behavior — no server-side rule persistence yet; check whether it re-asks on the next identical tool.
@@ -75,6 +77,20 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-12 — merged work to `main` + S4-01 LaunchAgent files — dev side
+- **Merged** `claude/in-place-task-branches` → `main` (fast-forward, 17 commits): the whole
+  working line (Sprint 1–3, keyless distribution, in-place branches, review→commit→build gate,
+  UX #1/#2/#4, all the device fixes) is now on `main`.
+- **S4-01 (files ready, not yet installed here):** `scripts/relayd-launchd.sh` (launcher: sets
+  PATH, sources `env.sh`, self-locates the daemon dir, `exec npm run dev`),
+  `scripts/com.pocketcode.relayd.plist` (LaunchAgent, `KeepAlive` + `RunAtLoad` + throttle), and
+  `AGENT_LAUNCHD.md` (install + crash/reboot test steps). Runs as a **LaunchAgent in the user
+  session** (not a LaunchDaemon) because the daemon needs the logged-in Claude Code subscription;
+  reboot survival needs **auto-login** for the agent user.
+- Verified on the dev machine: `bash -n` on the launcher, `plutil -lint` on the plist (both OK).
+- **➡️ Action on this Mac:** `git pull`, then follow `AGENT_LAUNCHD.md` to install + load the
+  LaunchAgent (stops the manual `caffeinate npm run dev` first), and enable auto-login.
 
 ### 2026-10-11 — composer: permission-mode + base-branch pickers (UX #4) — dev side
 - Task create now accepts `permissionMode` (default/acceptEdits/plan; **never** bypass) and

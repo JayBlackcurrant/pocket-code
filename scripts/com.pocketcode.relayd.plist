@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PocketCode daemon LaunchAgent (S4-01). Install to ~/Library/LaunchAgents/ on the agent
+     Mac. Replace __REPO__ with the absolute repo path (e.g. /Users/agent/workspaces/pocket-code)
+     and __HOME__ with the agent user's home. KeepAlive restarts it on crash; RunAtLoad starts
+     it at login (enable auto-login for reboot survival). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pocketcode.relayd</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/scripts/relayd-launchd.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Don't thrash if it crash-loops; wait 10s between restarts. -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/pocketcode-relayd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/pocketcode-relayd.log</string>
+</dict>
+</plist>
