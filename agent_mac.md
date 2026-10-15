@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-01 live-run data layer** landed (`RunStore` + `RunLog` + schema `runs`/`run_events`, wired as singletons in `index.ts`; typecheck clean, **189 tests**). Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-02 run-session spawn layer** landed (`runSession.ts`: Flutter `--machine` JSON parser + pure session engine + `makeSpawnRunSession` with retained child & stdin control; typecheck clean, **204 tests**). Earlier today: **S5-01 live-run data layer** (`RunStore` + `RunLog` + schema `runs`/`run_events`, wired as singletons in `index.ts`). Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -31,7 +31,8 @@
 | Always-on service (S4-01 LaunchAgent) | 🟡 **files ready** (`scripts/` + `AGENT_LAUNCHD.md`) — install on this Mac to get crash/reboot survival; not yet installed |
 | Daemon currently running? | ✅ **yes** — background under `caffeinate`, fresh with SDK 0.3.296 |
 | Live Run S5-00 (connectivity spike) | ✅ **cellular proven** via fixed-port `adb tcpip 5555` over the tailnet (same cmd on Wi-Fi/cellular/both, no toggling; reconnect via saved pairing). ⛔ hands-off **reboot re-arm blocked on ColorOS 15** (an app can't start the adb listener — root or manual). Hot-reload latency not yet captured. Throwaway spike — no daemon code. |
-| Live Run S5-01 (daemon data layer) | ✅ `RunStore` + `RunLog` + schema (`runs`, `run_events`) on branch `claude/live-run`; wired as singletons in `index.ts`. Typecheck clean, **189 tests** (+12). No `RunService`/routes yet (S5-02/03/05). |
+| Live Run S5-01 (daemon data layer) | ✅ `RunStore` + `RunLog` + schema (`runs`, `run_events`) on branch `claude/live-run`; wired as singletons in `index.ts`. No `RunService`/routes yet. |
+| Live Run S5-02 (run-session spawn) | ✅ `src/run/runSession.ts`: pure `parseFlutterMachineLine` + `createRunSessionEngine` (line buffer, appId tracking, reload/restart/stop request↔response) + `makeSpawnRunSession` (retained child, stdin control, caffeinate). Typecheck clean, **204 tests** (+15, incl. a real-spawn stdin round-trip). Next: S5-03 `RunService`. |
 
 ---
 
@@ -79,6 +80,33 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-02 run-session spawn layer (flutter run --machine) — dev side
+The one new mechanism vs BuildService (which discards the child and never writes stdin): a
+long-lived `flutter run --machine` child that we keep alive and drive via stdin. On branch
+`claude/live-run`. Factored into a pure engine + a thin spawn wrapper so it's fully testable.
+- **`src/run/runSession.ts`:**
+  - **`parseFlutterMachineLine(line)`** (pure): parses the Flutter daemon JSON protocol — a line
+    is a JSON array of messages; `app.start`→starting, `app.started`→started, `app.debugPort`,
+    `app.progress`, `app.log`, `app.stop`→stopped, `daemon.connected`; `{id,result|error}`→a
+    response (ok/code/message, incl. `result:true` for app.stop). Non-JSON / unknown → log / skip.
+  - **`createRunSessionEngine({write,onEvent})`** (pure state machine): per-stream line buffering,
+    appId tracking, forwards structured `RunSessionEvent`s, and correlates reload/restart/stop
+    requests to their responses by id. `reload`=app.restart fullRestart:false, `restart`=true,
+    `stop`=app.stop. Refuses control before the app has started; `failAllPending` settles
+    in-flight controls when the process exits; `flush` emits trailing partials. Per-line cap 4000.
+  - **`makeSpawnRunSession({caffeinate})`** (`SpawnRunSession`, injectable like `RunStep`): spawns
+    shell-free with a **piped stdin** (control writes reach flutter; `caffeinate -i` inherits
+    stdio so it still works), pumps stdout/stderr into the engine, exposes
+    `reload/restart/stop/kill/appId/exited`.
+- **Tested:** typecheck clean, **204 tests** (+15): parser cases (events, both success/error
+  responses, malformed→log, unknown→skip), engine (appId tracking, chunk splitting incl.
+  partial, stderr→log, reload writes+resolves on response, restart fullRestart:true, refuse
+  before start, flush, failAllPending), and a **real-spawn** test using a tiny Node stand-in for
+  `flutter --machine` that answers app.restart/app.stop on stdin — exercises spawn+stdin+exit.
+- **Not done here:** `RunService` (S5-03) that owns a session, maps `RunSessionEvent`→`RunLog`
+  events + `RunStore` status, and enforces the concurrency gate (S5-04). No real `flutter run`
+  exercised yet (needs the toolchain + an armed phone; S5-00 proved the transport).
 
 ### 2026-10-15 — S5-01 live-run data layer (RunStore + RunLog) — dev side
 Foundation for the live-run session feature (`LIVE_RUN_PLAN.md` §4), on branch `claude/live-run`.
