@@ -20,6 +20,7 @@ import { createPairingCode, redeemPairingCode } from '../auth/store.js';
 import { loadEnv } from '../config/env.js';
 import { buildServer } from '../server.js';
 import { RunService } from './runService.js';
+import { DeviceService } from './deviceService.js';
 import type { RunSessionEvent, RunSessionHandle, SpawnRunSession } from './runSession.js';
 
 const manifest: ProjectManifest = ProjectManifestSchema.parse({
@@ -108,7 +109,7 @@ beforeEach(async () => {
     builds: { onEvent: () => () => {} },
     buildLookup: { get: () => undefined },
   });
-  app = await buildServer({ env, registry, db, runner, tasks, events, git: fakeGit, builds, distribution, releaseNotes, notifications, runService });
+  app = await buildServer({ env, registry, db, runner, tasks, events, git: fakeGit, builds, distribution, releaseNotes, notifications, runService, deviceService: new DeviceService({ registry }) });
   await app.ready();
   const { code } = createPairingCode(db);
   const r = redeemPairingCode(db, code, 'phone');

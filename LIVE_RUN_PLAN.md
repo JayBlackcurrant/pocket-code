@@ -280,16 +280,17 @@ occasional re-arm is a 5-second annoyance, never a hang.
   > then `r`). Daemon implication (S5-06): `connectCascade` = try `:5555` → else parallel scan →
   > else a one-tap "phone needs re-arm" state (never hang).
 
-**Phase 1 — daemon run session:**
-- [ ] **S5-01** `RunLog` + `RunStore` (+ migrations), wired as singletons in `index.ts`.
-- [ ] **S5-02** `spawnRunSession` (retained child + stdin + caffeinate) and `flutter run --machine`
+**Phase 1 — daemon run session:** _(S5-01…06 done on branch `claude/live-run`; 243 tests)_
+- [x] **S5-01** `RunLog` + `RunStore` (+ migrations), wired as singletons in `index.ts`.
+- [x] **S5-02** `spawnRunSession` (retained child + stdin + caffeinate) and `flutter run --machine`
       JSON parsing → run events.
-- [ ] **S5-03** `RunService`: start/reload/restart/stop; event-log-first; AbortController cancel.
-- [ ] **S5-04** Extend the concurrency gate (shared `CheckoutGuard`: run + task same-branch); discard
+- [x] **S5-03** `RunService`: start/reload/restart/stop; event-log-first; AbortController cancel.
+- [x] **S5-04** Extend the concurrency gate (shared `CheckoutGuard`: run + task same-branch); discard
       refuses while a run is live.
-- [ ] **S5-05** Endpoints + WS stream (`/projects/:id/devices`, `/projects/:id/runs`,
+- [x] **S5-05** Endpoints + WS stream (`/projects/:id/runs`,
       `/runs/:id/{reload,restart,stop}`, `GET /runs/:id`, `/runs/:id/logs`, `WS /runs/:id/stream`).
-- [ ] **S5-06** Device discovery endpoint runs the connect cascade; returns device id + quality.
+- [x] **S5-06** Device discovery endpoint (`GET /projects/:id/devices?host=`) runs the connect
+      cascade; returns device serial + link quality (or `reArmNeeded`).
 - [ ] **S5-07** Auto-reload after a Claude edit (subscribe to `AgentRunner.onEvent`, debounced).
 
 **Phase 1 — app:**

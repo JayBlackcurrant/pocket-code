@@ -34,6 +34,7 @@ import { verifyDownloadToken } from './build/downloadToken.js';
 import { ReleaseNotesService, ReleaseNotesError } from './build/releaseNotes.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
 import { type RunService, RunError, RunBusyError } from './run/runService.js';
+import { DeviceService, DeviceError } from './run/deviceService.js';
 import type { StoredRunEvent } from './db/runLog.js';
 import type { NotificationService } from './notify/notificationService.js';
 import type { NotificationRow } from './db/notificationStore.js';
@@ -52,6 +53,8 @@ export interface ServerDeps {
   notifications: NotificationService;
   // Live-run service (S5-03). Routes land in S5-05; wired now so the service exists alongside builds.
   runService: RunService;
+  // Device discovery (S5-06): adb connect cascade over the tailnet for the run target.
+  deviceService: DeviceService;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */
@@ -134,6 +137,11 @@ const StartRunBody = z.object({
 
 const RunTailQuery = z.object({
   tail: z.coerce.number().int().min(0).max(1000).default(50),
+});
+
+// The phone's own tailnet host (IPv4 or MagicDNS name). Validated so it is safe as an argv token.
+const DevicesQuery = z.object({
+  host: z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/, 'invalid host'),
 });
 
 const MarkReadBody = z.object({ upTo: z.coerce.number().int().min(0) });
@@ -805,6 +813,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   );
 
   // --- Live run (S5-05) ------------------------------------------------------
+
+  // Discover the run target (S5-06): run the adb connect cascade for the phone's tailnet host and
+  // report the device serial + link quality (or reArmNeeded). The phone passes its own tailnet IP.
+  app.get<{ Params: { id: string }; Querystring: { host?: string } }>(
+    '/projects/:id/devices',
+    auth,
+    async (req, reply) => {
+      const q = DevicesQuery.safeParse(req.query);
+      if (!q.success) return reply.code(400).send({ error: 'invalid or missing host', issues: q.error.issues });
+      try {
+        return await deps.deviceService.discover({ projectId: req.params.id, host: q.data.host });
+      } catch (err) {
+        if (err instanceof DeviceError) return reply.code(409).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
 
   // Start a run session: `flutter run --machine` targeting the phone over the tailnet. One run
   // per project; a Claude task may coexist only on the same branch (S5-04 → 409 otherwise).

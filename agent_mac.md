@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-05 run routes + WS** landed (`POST /projects/:id/runs`, `GET /projects/:id/runs`, `GET /runs/:id?tail=`, `GET /runs/:id/logs?since=`, `POST /runs/:id/{reload,restart,stop}`, `WS /runs/:id/stream?since=`; `RunBusyError`/`RunError`→409; typecheck clean, **235 tests**). Earlier today: S5-04 `CheckoutGuard`; S5-03 `RunService`; S5-02 spawn; S5-01 data layer. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-06 device discovery** landed (`DeviceService`: adb connect cascade over the tailnet — fixed :5555 → parallel scan → confirm via adb/flutter → link quality — behind an injectable runner; `GET /projects/:id/devices?host=`; typecheck clean, **243 tests**). **Daemon side of Feature 1 (live run) is complete (S5-01…06).** Still: S5-07 auto-reload after a Claude edit, then the Flutter app. Earlier today: S5-05 routes+WS; S5-04 `CheckoutGuard`; S5-03 `RunService`; S5-02 spawn; S5-01 data layer. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -35,7 +35,8 @@
 | Live Run S5-02 (run-session spawn) | ✅ `src/run/runSession.ts`: pure `parseFlutterMachineLine` + `createRunSessionEngine` (line buffer, appId tracking, reload/restart/stop request↔response) + `makeSpawnRunSession` (retained child, stdin control, caffeinate). Real-spawn stdin round-trip tested. |
 | Live Run S5-03 (RunService) | ✅ `src/run/runService.ts`: one `flutter run --machine` session per project; maps events → `RunLog`/`RunStore`; `start`/`reload`/`restart`/`stop`/`stopAll`; `recoverInterrupted`. Wired in `index.ts` + `ServerDeps`. |
 | Live Run S5-04 (concurrency gate) | ✅ `src/checkoutGuard.ts` (`CheckoutGuard`): a task + a run coexist only on the **same branch**; one task + one run per project; fresh task start refused while a run is live; shared instance wired into AgentRunner (replaces `activeProjects`) + RunService via `index.ts`. Discard refused (409) while a run is live on the task's branch. |
-| Live Run S5-05 (routes + WS) | ✅ `server.ts`: `POST /projects/:id/runs` (→201, `RunBusyError`/`RunError`→409), `GET /projects/:id/runs`, `GET /runs/:id?tail=`, `GET /runs/:id/logs?since=`, `POST /runs/:id/{reload,restart,stop}`, `WS /runs/:id/stream?since=` (verbatim clone of the build stream). Typecheck clean, **235 tests** (+7 route tests via app.inject). Next: S5-06 device discovery (adb connect cascade), then the app (`/app`). |
+| Live Run S5-05 (routes + WS) | ✅ `server.ts`: `POST /projects/:id/runs` (→201, `RunBusyError`/`RunError`→409), `GET /projects/:id/runs`, `GET /runs/:id?tail=`, `GET /runs/:id/logs?since=`, `POST /runs/:id/{reload,restart,stop}`, `WS /runs/:id/stream?since=` (verbatim clone of the build stream). |
+| Live Run S5-06 (device discovery) | ✅ `src/run/deviceService.ts` (`DeviceService`): adb connect cascade (fixed :5555 → **parallel** scan → `adb connect` → confirm via `adb devices` + `flutter devices --machine`) + link quality from `tailscale status`; shell-out behind an injectable `DeviceRunner` (`realDeviceRunner` = spawn + `net` probe). `GET /projects/:id/devices?host=` (400 bad host, 409 inactive). Typecheck clean, **243 tests** (+8). **Daemon side of Feature 1 done (S5-01…06).** Remaining daemon bit: S5-07 auto-reload after a Claude edit. Then the Flutter app (`app_progress.md`). ⚠️ no real `adb`/`flutter run` exercised yet. |
 
 ---
 
@@ -83,6 +84,30 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-06 device discovery (adb connect cascade) — dev side
+First daemon code that shells out to real `adb`/`flutter`/`tailscale` — kept behind an injectable
+runner so the cascade is unit-testable. Branch `claude/live-run`. Completes the daemon side of
+Feature 1 (live run), S5-01…06.
+- **`src/run/deviceService.ts` (`DeviceService`):** `discover({projectId, host})` runs the cascade —
+  try the fixed `:5555` (`adb tcpip` convention) → else **parallel** TCP scan of a range
+  (`mapLimit`, concurrency 128) → `adb connect` the first open port → confirm it shows as `device`
+  in `adb devices` → best-effort `flutter devices --machine` (in the project cwd, fvm/system per
+  manifest) for visibility + name → link quality from `tailscale status`. Returns
+  `{host, port, connected, reArmNeeded, quality, devices[]}`; `reArmNeeded:true` when nothing
+  answers (ColorOS post-reboot case). `DeviceError` for an inactive project.
+- **Injectable `DeviceRunner`** (`run` + TCP `probe`); `realDeviceRunner` = shell-free `spawn`
+  (with timeout/kill) + `net.connect` probe. Pure parsers exported: `parseAdbDevices`,
+  `parseFlutterDevices` (tolerant JSON), `parseLinkQuality` (direct/relay/unknown).
+- **Route:** `GET /projects/:id/devices?host=` — the phone passes its **own** tailnet IP (host
+  validated as a safe argv token; keeps tailnet names out of daemon config). 400 bad/missing host,
+  409 inactive project. Wired into `ServerDeps` + `index.ts` (+ the 3 test call-sites).
+- **Tested:** typecheck clean, **243 tests** (+8): cascade (fixed-port hit, scan fallback,
+  nothing→reArmNeeded, adb-missing→reArmNeeded, inactive→DeviceError) + the three parsers. Fake
+  `DeviceRunner`, small scan range.
+- **Next:** S5-07 auto-reload after a Claude edit (RunService subscribes to AgentRunner.onEvent,
+  debounced), then the Flutter app side. **No real adb/flutter run has executed yet** — needs the
+  armed phone from S5-00; worth a real end-to-end now that the daemon chain is complete.
 
 ### 2026-10-15 — S5-05 run routes + WebSocket (phone-facing API) — dev side
 Exposes the run session to the phone, mirroring the build routes/stream. Branch `claude/live-run`.

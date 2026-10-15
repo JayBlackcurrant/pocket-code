@@ -8,6 +8,7 @@ import { BuildLog } from './db/buildLog.js';
 import { RunStore } from './db/runStore.js';
 import { RunLog } from './db/runLog.js';
 import { RunService } from './run/runService.js';
+import { DeviceService } from './run/deviceService.js';
 import { CheckoutGuard } from './checkoutGuard.js';
 import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
   // One shared guard so a Claude task and a live-run session coordinate the single checkout (S5-04).
   const checkoutGuard = new CheckoutGuard();
   const runService = new RunService({ registry, runs: runStore, runLog, tasks, git, checkoutGuard });
+  const deviceService = new DeviceService({ registry });
   const runner = new AgentRunner({
     registry,
     git,
@@ -79,6 +81,7 @@ async function main(): Promise<void> {
     releaseNotes,
     notifications,
     runService,
+    deviceService,
   });
   // Route runner + build logs through fastify's pino logger (same stream as HTTP logs).
   runner.setLogger(app.log.child({ mod: 'agent' }));
@@ -86,6 +89,7 @@ async function main(): Promise<void> {
   distribution.setLogger(app.log.child({ mod: 'build' }));
   releaseNotes.setLogger(app.log.child({ mod: 'build' }));
   runService.setLogger(app.log.child({ mod: 'run' }));
+  deviceService.setLogger(app.log.child({ mod: 'run' }));
 
   // Crash recovery (S4-02): fail any task left non-terminal by a previous crash/restart; they
   // can be resumed from their stored session id.

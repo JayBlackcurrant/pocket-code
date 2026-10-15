@@ -22,6 +22,7 @@ import { signDownloadToken } from './downloadToken.js';
 import { RunStore } from '../db/runStore.js';
 import { RunLog } from '../db/runLog.js';
 import { RunService } from '../run/runService.js';
+import { DeviceService } from '../run/deviceService.js';
 import { buildServer } from '../server.js';
 
 const DL_SECRET = 'download-route-test-secret-01';
@@ -90,6 +91,7 @@ beforeEach(async () => {
     releaseNotes,
     notifications,
     runService: new RunService({ registry, runs: new RunStore(db), runLog: new RunLog(db), tasks }),
+    deviceService: new DeviceService({ registry }),
   });
   await app.ready();
 });
