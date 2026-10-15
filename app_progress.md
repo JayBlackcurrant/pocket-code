@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no device tokens or
 > pairing codes. The app stores its token in `flutter_secure_storage` only.
 
-**Last updated:** 2026-10-10 — by Claude Code on the dev machine (app side)
+**Last updated:** 2026-10-15 — **S5-08 live-run app data layer** (`src/run/`: `RunRow`/`DeviceDiscovery` models, `run_feed` event→line mapper, `RunStream` WS provider, `RunActions` — devices/start/reload/restart/stop). Mirrors `src/builds/`. analyze clean, **51 tests** (+10). Daemon side of Feature 1 is complete (see `agent_mac.md`). Next: S5-09 run screen UI.
 
 ---
 
@@ -27,6 +27,7 @@
 | Builds screen (S3-06) | ✅ done — Build & ship screen: start build, live log (WS), editable AI release notes, group field, upload, Firebase link, retry |
 | Biometric gate (S3-07) | ✅ done — `local_auth` gate on push, build/retry, upload (distribute), and "always allow"; fails closed |
 | Notifications inbox (S3-05) | ✅ done — global keepAlive WS inbox + unread badge; in-app only (daemon-driven, no external push) |
+| Live Run data layer (S5-08) | ✅ done — `src/run/`: `RunRow` + `DeviceDiscovery` models, pure `run_feed` (event→line + status reducers + debugUri), `RunStream` (WS `/runs/:id/stream?since=`, replay+reconnect), `RunActions` (devices/start/reload/restart/stop/activeForTask). No UI yet (S5-09). |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
 > instruction; `CLAUDE.md` repo-layout line updated accordingly). S1-09 and S1-10 are **built
@@ -79,6 +80,30 @@
 ---
 
 ## Log
+
+### 2026-10-15 — S5-08 live-run app data layer (`src/run/`)
+App side of Feature 1 (live run), mirroring `src/builds/`. Data layer + providers only — no UI yet
+(that's S5-09). The daemon side (S5-01…07) is complete; these consume its run routes/WS.
+- **Models:** `models/run_row.dart` (`RunRow` ← POST/GET `/runs`: id, projectId, status
+  starting|running|reloading|stopped|failed, branch, taskId?, deviceSerial?, debugPort?, error? +
+  status helpers); `models/device.dart` (`DeviceDiscovery` + `RunDevice` ← `GET /projects/:id/devices`:
+  host, port?, connected, reArmNeeded, quality direct|relay|unknown, devices[], `primary`);
+  `models/run_stream_state.dart` (`RunStreamState`).
+- **`run_feed.dart` (pure):** `mapRunEvent` (run.log→log, started→success, reload/restart/autoreload→
+  reload, reloaded/restarted→success with flutter's "Reloaded in …ms" message, *_failed→error,
+  progress→lifecycle (dropped when empty), stopping/stopped→lifecycle, error→error; created/debugPort
+  →none), `runStatusFromEvent`, `debugUriFromEvent`.
+- **`providers/run_stream.dart`:** `RunStream` — WS `/runs/:id/stream?since=`, replay-then-tail +
+  2s reconnect from last seq, 2000-line cap. Verbatim shape of `BuildStream`.
+- **`providers/run_actions.dart`:** `RunActions` (codegen) — `devices(projectId, host)`,
+  `start(projectId, {deviceSerial, taskId?, flavor?})`, `reload`/`restart` (→`RunControlResult`),
+  `stop`, `activeForTask`.
+- **Tested:** `flutter analyze` clean, `flutter test` **51/51** (+10: run_feed mapper/status/debugUri,
+  RunRow + DeviceDiscovery parsing incl. the re-arm-needed case). build_runner regenerated.
+- **Next:** S5-09 run screen (device picker, control bar Run/Stop/Reload/Restart, status +
+  connection quality, virtualized live log, "Open app"); S5-10 task-page entry + swipeable panels;
+  S5-11 "phone unreachable → Reconnect". The app will need the phone's own tailnet IP for `devices`
+  (read a 100.64/10 interface via `NetworkInterface.list`).
 
 ### 2026-10-11 — build-after-continue fix + hide cost
 - **Fix "stuck on the previous build":** the Build & ship screen auto-adopted the *latest*
