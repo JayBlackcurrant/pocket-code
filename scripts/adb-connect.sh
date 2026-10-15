@@ -12,38 +12,58 @@
 # it as an argument or via $POCKETCODE_ADB_HOST. The last working port is cached
 # OUTSIDE the repo at ~/.pocketcode/adb-last-port.
 #
+# S5-00 result (2026-10-15): the reliable transport is a FIXED port via `adb tcpip 5555`
+# (set once over USB) — then the same `adb connect <host>:5555` works on Wi-Fi/cellular/both.
+# Android 11+ Wireless Debugging re-randomizes its port on every network switch, and on
+# ColorOS 15 an app can't auto-start the adb listener after a reboot — so re-arm is manual.
+# This script therefore tries :5555 first and only parallel-scans when that misses.
+#
 # Usage:
-#   scripts/adb-connect.sh pair    <host> [pairPort]   # one-time: pair wireless debugging
+#   scripts/adb-connect.sh pair    <host> <pairPort>   # one-time: pair wireless debugging
+#   scripts/adb-connect.sh tcpip   <host>              # pin adbd to :5555 (needs USB attached)
 #   scripts/adb-connect.sh connect <host> [port]       # connect (default command)
 #   scripts/adb-connect.sh run     <host> [port]       # connect, then `flutter run`
 #
 #   host : the phone's Tailscale IP (100.x) or MagicDNS name. Or set
 #          POCKETCODE_ADB_HOST and omit it.
-#   port : the adb-tls-connect port shown on the phone under
-#          Settings > Developer options > Wireless debugging. Optional; if omitted
-#          the script tries the cached port, then sweeps a range.
+#   port : adb port. Optional; if omitted the cascade tries :5555 → cached → parallel scan.
 #
 # Env:
-#   POCKETCODE_ADB_HOST   default host if not passed as an argument
-#   POCKETCODE_ADB_SWEEP  port range to sweep, "LOW-HIGH" (default 30000-44000)
+#   POCKETCODE_ADB_HOST           default host if not passed as an argument
+#   POCKETCODE_ADB_PORT           fixed port to try first (default 5555)
+#   POCKETCODE_ADB_SWEEP          scan range "LOW-HIGH" (default 30000-44000)
 #   POCKETCODE_ADB_SWEEP_TIMEOUT  per-port probe timeout seconds (default 1)
+#   POCKETCODE_ADB_SCAN_PARALLELISM  concurrent probes in the scan (default 128)
 #
 # Safe by design: no sudo, no root, no destructive commands. Only adb/flutter.
 
 set -euo pipefail
 
+# Internal: a single parallel-scan probe, re-invoked by xargs. Prints the port if open.
+if [ "${1:-}" = "__probe" ]; then
+  __t="${POCKETCODE_ADB_SWEEP_TIMEOUT:-1}"
+  if command -v nc >/dev/null 2>&1; then
+    nc -z -G "$__t" -w "$__t" "$2" "$3" >/dev/null 2>&1 && printf '%s\n' "$3"
+  else
+    timeout "$__t" bash -c "exec 3<>/dev/tcp/$2/$3" >/dev/null 2>&1 && printf '%s\n' "$3"
+  fi
+  exit 0
+fi
+
 # --- config -----------------------------------------------------------------
 CMD="${1:-connect}"
 case "$CMD" in
-  pair|connect|run) shift ;;
+  pair|tcpip|connect|run) shift ;;
   *) CMD="connect" ;;  # treat a bare host as the default `connect` command
 esac
 
 HOST="${1:-${POCKETCODE_ADB_HOST:-}}"
 PORT_ARG="${2:-}"
 
+FIXED_PORT="${POCKETCODE_ADB_PORT:-5555}"
 SWEEP_RANGE="${POCKETCODE_ADB_SWEEP:-30000-44000}"
 PROBE_TIMEOUT="${POCKETCODE_ADB_SWEEP_TIMEOUT:-1}"
+SCAN_PARALLELISM="${POCKETCODE_ADB_SCAN_PARALLELISM:-128}"
 
 STATE_DIR="${HOME}/.pocketcode"
 PORT_CACHE="${STATE_DIR}/adb-last-port"
@@ -63,16 +83,7 @@ require_host() {
 cache_port() { mkdir -p "$STATE_DIR"; printf '%s\n' "$1" > "$PORT_CACHE"; }
 cached_port() { [ -f "$PORT_CACHE" ] && cat "$PORT_CACHE" || true; }
 
-# Probe a TCP port quickly (open/closed), without touching adb yet.
-probe_tcp() {
-  local host="$1" port="$2"
-  if command -v nc >/dev/null 2>&1; then
-    nc -z -G "$PROBE_TIMEOUT" -w "$PROBE_TIMEOUT" "$host" "$port" >/dev/null 2>&1
-  else
-    # bash /dev/tcp fallback (no nc)
-    timeout "$PROBE_TIMEOUT" bash -c "exec 3<>/dev/tcp/${host}/${port}" >/dev/null 2>&1
-  fi
-}
+# (TCP probing for the scan is done by the `__probe` self-reinvocation at the top of the file.)
 
 # Try `adb connect host:port`; return 0 only if the device shows as connected.
 try_adb_connect() {
@@ -85,37 +96,43 @@ try_adb_connect() {
 }
 
 # --- the connect cascade ----------------------------------------------------
-# 1) explicit port arg  2) cached last-known port  3) sweep the range.
+# Fast path first (S5-00): explicit arg → fixed :5555 (adb tcpip) → cached → parallel scan.
+# With a pinned :5555 you essentially never scan; the scan only matters right after a reboot.
 connect_cascade() {
   require_host
   local p
 
-  # 1) explicit
+  # 1) explicit port arg
   if [ -n "$PORT_ARG" ]; then
     info "trying given port ${PORT_ARG}…"
     if try_adb_connect "$HOST" "$PORT_ARG"; then cache_port "$PORT_ARG"; ok "connected on ${PORT_ARG}"; return 0; fi
     warn "given port ${PORT_ARG} did not connect"
   fi
 
-  # 2) cached
+  # 2) fixed port — the `adb tcpip 5555` convention, the common steady state
+  if [ "${PORT_ARG:-}" != "$FIXED_PORT" ]; then
+    info "trying fixed port ${FIXED_PORT} (adb tcpip)…"
+    if try_adb_connect "$HOST" "$FIXED_PORT"; then cache_port "$FIXED_PORT"; ok "connected on ${FIXED_PORT}"; return 0; fi
+  fi
+
+  # 3) cached last-known port
   p="$(cached_port)"
-  if [ -n "$p" ] && [ "$p" != "${PORT_ARG:-}" ]; then
+  if [ -n "$p" ] && [ "$p" != "${PORT_ARG:-}" ] && [ "$p" != "$FIXED_PORT" ]; then
     info "trying last-known port ${p}…"
     if try_adb_connect "$HOST" "$p"; then ok "connected on ${p} (cached)"; return 0; fi
     warn "cached port ${p} stale (phone likely rebooted / re-randomized the port)"
   fi
 
-  # 3) sweep
+  # 4) parallel scan (serial was unusable over the tailnet — S5-00)
   local low="${SWEEP_RANGE%-*}" high="${SWEEP_RANGE#*-}"
-  info "sweeping ${HOST} ports ${low}-${high} for an open adb port (slow over a relay)…"
-  for ((port=low; port<=high; port++)); do
-    if probe_tcp "$HOST" "$port"; then
-      info "port ${port} is open — trying adb connect…"
-      if try_adb_connect "$HOST" "$port"; then cache_port "$port"; ok "connected on ${port} (swept)"; return 0; fi
-    fi
+  info "parallel-scanning ${HOST} ports ${low}-${high} (needed only right after a reboot)…"
+  for port in $(seq "$low" "$high" | xargs -P "$SCAN_PARALLELISM" -n1 "$0" __probe "$HOST" 2>/dev/null | sort -n); do
+    info "port ${port} open — trying adb connect…"
+    if try_adb_connect "$HOST" "$port"; then cache_port "$port"; ok "connected on ${port} (scanned)"; return 0; fi
   done
 
-  die "no reachable adb port on ${HOST}. Re-arm the phone (Wireless debugging ON, over Wi-Fi), then retry."
+  die "no reachable adb port on ${HOST}. ColorOS won't auto-start adb after a reboot — re-arm first: \
+plug in USB and run '$0 tcpip ${HOST}', or flip Wireless debugging ON on Wi-Fi, then retry."
 }
 
 # --- link quality: direct vs relayed --------------------------------------
@@ -138,6 +155,21 @@ do_pair() {
   ok "paired (persists until factory reset). Now run: $0 connect ${HOST} <connectPort>"
 }
 
+# Pin adbd to the fixed port. Needs the phone attached over USB (ColorOS won't let an
+# app do this; `adb tcpip` is a host-side command against a USB-attached device).
+do_tcpip() {
+  need adb; require_host
+  info "pinning adbd to :${FIXED_PORT} (USB must be attached)…"
+  adb tcpip "$FIXED_PORT"
+  cache_port "$FIXED_PORT"
+  ok "adbd now listens on :${FIXED_PORT} (until the next reboot). Unplug USB, then: $0 connect ${HOST}"
+}
+
+# Serial of the connected device as adb reports it (host:port), for `flutter run -d`.
+connected_serial() {
+  adb devices | awk -v h="$HOST" '$1 ~ h ":" {print $1; exit}'
+}
+
 do_connect() {
   need adb
   connect_cascade
@@ -155,12 +187,15 @@ do_run() {
   need adb; need flutter
   connect_cascade
   report_quality
-  info "launching 'flutter run' on ${HOST} (press r = hot reload, R = hot restart, q = quit)…"
-  flutter run -d "$HOST":* 2>/dev/null || flutter run
+  local serial; serial="$(connected_serial)"
+  [ -n "$serial" ] || die "could not determine the device serial from 'adb devices'"
+  info "launching 'flutter run -d ${serial}' (press r = hot reload, R = hot restart, q = quit)…"
+  flutter run -d "$serial"
 }
 
 case "$CMD" in
   pair)    do_pair ;;
+  tcpip)   do_tcpip ;;
   run)     do_run ;;
   connect) do_connect ;;
 esac
