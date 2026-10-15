@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extension/context.dart';
+import '../../review/models/diff_file.dart';
+import '../../review/providers/diff_providers.dart';
+import '../../routes/app_router.dart';
 import '../../tasks/models/task_detail.dart';
 import '../../tasks/providers/task_provider.dart';
 import '../models/device.dart';
@@ -26,7 +29,7 @@ class RunPage extends ConsumerStatefulWidget {
   ConsumerState<RunPage> createState() => _RunPageState();
 }
 
-class _RunPageState extends ConsumerState<RunPage> {
+class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStateMixin {
   String? _runId;
   bool _busy = false;
   bool _resumeChecked = false;
@@ -36,11 +39,13 @@ class _RunPageState extends ConsumerState<RunPage> {
   DeviceDiscovery? _discovery;
   final TextEditingController _hostCtrl = TextEditingController();
   final ScrollController _scroll = ScrollController();
+  late final TabController _tabs = TabController(length: 2, vsync: this);
 
   @override
   void dispose() {
     _hostCtrl.dispose();
     _scroll.dispose();
+    _tabs.dispose();
     super.dispose();
   }
 
@@ -179,9 +184,71 @@ class _RunPageState extends ConsumerState<RunPage> {
       children: [
         _header(context, state),
         if (state.error != null) _banner(context, state.error!, context.colors.red),
-        Expanded(child: _logView(context, state)),
+        TabBar(
+          controller: _tabs,
+          tabs: const [Tab(text: 'Logs'), Tab(text: 'Code')],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabs,
+            children: [
+              _logView(context, state),
+              _codeView(context),
+            ],
+          ),
+        ),
         _controlBar(context, state),
       ],
+    );
+  }
+
+  // Read-only view of the task's changed files (manual editing is Phase 2, S5-12). Swipe here
+  // from Logs; tap a file to open the existing diff/code viewer.
+  Widget _codeView(BuildContext context) {
+    final filesAsync = ref.watch(diffSummaryProvider(widget.taskId));
+    return filesAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => _centerText('$e'),
+      data: (files) {
+        if (files.isEmpty) {
+          return Center(
+            child: Text('No changed files',
+                style:
+                    context.text.regular14.copyWith(color: context.colors.muted)),
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(diffSummaryProvider(widget.taskId)),
+          child: ListView.builder(
+            itemCount: files.length,
+            itemBuilder: (_, i) => _fileTile(context, files[i]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _fileTile(BuildContext context, DiffFileSummary file) {
+    return ListTile(
+      dense: true,
+      title: Text(file.path, style: context.text.regular14),
+      trailing: file.binary
+          ? Text('binary',
+              style: context.text.regular12.copyWith(color: context.colors.muted))
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('+${file.additions}',
+                    style: context.text.regular12
+                        .copyWith(color: context.colors.green)),
+                const SizedBox(width: 8),
+                Text('-${file.deletions}',
+                    style:
+                        context.text.regular12.copyWith(color: context.colors.red)),
+              ],
+            ),
+      onTap: () =>
+          context.router.push(DiffFileRoute(taskId: widget.taskId, path: file.path)),
     );
   }
 

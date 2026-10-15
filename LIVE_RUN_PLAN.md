@@ -293,13 +293,16 @@ occasional re-arm is a 5-second annoyance, never a hang.
       cascade; returns device serial + link quality (or `reArmNeeded`).
 - [x] **S5-07** Auto-reload after a Claude edit (subscribe to `AgentRunner.onEvent`, debounced).
 
-**Phase 1 — app:** _(S5-08/09/11 done on branch `claude/live-run`; 54 tests)_
+**Phase 1 — app:** _(COMPLETE on branch `claude/live-run`; 54 tests)_
 - [x] **S5-08** `src/run/` feature: run_row, run_feed, run_stream, run_actions.
 - [x] **S5-09** Run screen: device picker, control bar (Run/Stop/Reload/Restart), status +
       connection quality, virtualized live log, "switch to app" hint.
-- [~] **S5-10** Task-page entry + resume-in-progress-run ✅; swipeable Logs | Code | Controls panels
-      still pending (log + controls share one screen for now).
+- [x] **S5-10** Task-page entry + resume-in-progress-run; swipeable **Logs | Code** tabs (control
+      bar persistent; Code lists the task's changed files → opens the diff/code viewer).
 - [x] **S5-11** "Phone unreachable → re-arm" card + instructions (reconnect/re-check).
+
+**→ Feature 1 (live run) is code-complete. Remaining before relying on it: a real end-to-end on the
+armed phone (no real `adb`/`flutter run` exercised yet — everything is fake/unit-tested).**
 
 **Phase 2 (later):**
 - [ ] **S5-12** In-app manual code editor + path-safe `POST /tasks/:id/file` write → triggers reload.
