@@ -8,7 +8,7 @@
 > Related: [`PROJECT_DESCRIPTION.md`](PROJECT_DESCRIPTION.md), [`SPRINT_PLAN.md`](SPRINT_PLAN.md),
 > [`agent_mac.md`](agent_mac.md), [`app_progress.md`](app_progress.md).
 
-**Last updated:** 2026-10-15 · **Status:** Phase 0 (S5-00) run — cellular connectivity **proven** via fixed-port `adb tcpip 5555` over the tailnet; hands-off **reboot re-arm blocked on ColorOS 15** (needs root or a manual step). See the S5-00 result notes in §3.2, §3.3 and §8.
+**Last updated:** 2026-10-15 · **Status:** **Feature 1 code-complete** — daemon S5-01…07 (247 tests) + app S5-08…11 (54 tests) on branch `claude/live-run`. S5-00 proved cellular connectivity via fixed-port `adb tcpip 5555`; hands-off reboot re-arm is blocked on ColorOS 15 (manual re-arm, §3.2). **Not yet run end-to-end on a real phone** — the top parked item (§11). Enhancement ideas (embed/split-screen, run base, debug console) in §10; Phase 2 in §8.
 
 ---
 
@@ -308,6 +308,11 @@ armed phone (no real `adb`/`flutter run` exercised yet — everything is fake/un
 - [ ] **S5-12** In-app manual code editor + path-safe `POST /tasks/:id/file` write → triggers reload.
 - [ ] **S5-13** Custom boot-helper app (NSD port report, realme autostart) if off-the-shelf falls
       short.
+- [ ] **S5-14** **Debug console** via the Dart VM Service (see §10.3). Recommended first Phase-2 item.
+- [ ] **S5-15** **Run the base branch** without a task (project-level Run entry) + make "switch to
+      app" open Android **split-screen** (see §10.1/§10.2).
+- [ ] **S5-16** **Base + task concurrent runs** — needs two working trees + two devices/appIds; large,
+      reverses the single-checkout model (see §10.2). Park unless clearly needed.
 
 **Definition of done** (per `CLAUDE.md`): typecheck/analyze/lint clean, tests for changed behavior,
 no secrets, docs updated, progress logs (`agent_mac.md` / `app_progress.md`) updated.
@@ -319,3 +324,56 @@ no secrets, docs updated, progress logs (`agent_mac.md` / `app_progress.md`) upd
 **S5-00 first.** No daemon/app code until the connect cascade proves `flutter run` + hot reload are
 usable to the real phone over cellular. Everything downstream depends on that being true, so we
 de-risk it on day one with a throwaway script before building `RunService`.
+
+---
+
+## 10. Enhancement ideas (from the 2026-10-15 review)
+
+Three questions raised after Feature 1 went code-complete. Captured here with the honest feasibility.
+
+### 10.1 Seeing the app *inside* PocketCode
+Android does **not** allow embedding another app's screen inside yours (reserved for launchers /
+accessibility / screen-capture), and the run target is a separate app/process. So true embedding
+isn't possible while the app runs on the phone itself. Ways to see it *alongside*:
+- **Split-screen (recommended):** Android's built-in split view. Free; make the "switch to app"
+  button open it via a small platform channel. → **S5-15**.
+- **Picture-in-Picture:** the app under test floats over PocketCode — but only if *that* app opts
+  into PiP, so not general.
+- **Emulator-on-Mac + video stream:** the only path to true "inside the app", but it abandons the
+  real-device-over-cellular design (the D5 fork we rejected). Heavy; not planned.
+
+### 10.2 Running the base branch, and base + task at once
+Two separate asks:
+- **Run the base branch (no task):** already supported by the daemon — `POST /projects/:id/runs`
+  with no `taskId` runs the current checkout (which can be base). Only missing a **project-level
+  Run entry** in the app. Small. → part of **S5-15**.
+- **Base *and* a task branch at the same time:** blocked by two hard limits — (1) tasks run in the
+  **single** project checkout (worktrees were dropped because they don't carry the gitignored
+  signing keys), and `CheckoutGuard` allows a run + task only on the **same** branch; (2) base and a
+  task share the **same applicationId**, so the same app can't run twice on one phone. Needs **two
+  working trees** (git worktree — a debug run self-signs, so it may not need the release keystore
+  that broke worktrees for *builds* — or a second clone) **and** **two devices or distinct appIds**.
+  Large, and reverses a core decision. → **S5-16**, parked unless clearly worth it.
+
+### 10.3 A debug console instead of the terminal log
+Today the daemon streams `flutter run` stdout (`app.log` lines). A proper **debug console** means
+connecting to the app's **Dart VM Service** — whose URI we already capture (`run.debugPort` →
+`wsUri`) — via the `vm_service` protocol, and surfacing its structured streams: `Logging` (levels,
+logger names, timestamps), structured **errors + stack traces**, and optionally expression
+**eval**/inspection. Clean, well-scoped, fits the event-log-first + WS-replay model (new daemon
+VM-service client emitting `run.console` events + an app console view). **Recommended first Phase-2
+item.** → **S5-14**.
+
+---
+
+## 11. On hold / parked (Feature 1 scope)
+
+- **Real end-to-end on the armed phone** — nothing has driven real `adb`/`flutter run` yet; the
+  whole chain is fake/unit-tested. **Highest-value next step before relying on Feature 1.**
+- **S5-00 hot-reload latency number** — still uncaptured (`scripts/adb-connect.sh run <host>`).
+- **S5-12** manual in-app code editor (Phase 2).
+- **S5-13** custom boot-helper app (only if the off-the-shelf arming proves unreliable on ColorOS).
+- **S5-14 / S5-15 / S5-16** — the §10 enhancements above.
+- Broader project items (Sprint 4 hardening, LaunchAgent install, Shorebird, CI/CD) live in
+  [`agent_mac.md`](agent_mac.md), [`app_progress.md`](app_progress.md) and
+  [`NEXT_PHASE_IDEAS.md`](NEXT_PHASE_IDEAS.md).
