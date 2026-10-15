@@ -111,6 +111,39 @@ CREATE TABLE IF NOT EXISTS build_events (
 );
 CREATE INDEX IF NOT EXISTS idx_build_events_build_seq ON build_events(build_id, seq);
 
+-- Live run sessions (S5-01, Feature 1). A run session spawns 'flutter run' targeting the
+-- phone over the tailnet and holds the project checkout open for hot reload. One row per
+-- session; RunService owns the lifecycle (S5-03). device_serial is the adb serial (host:port),
+-- debug_port the Dart VM service URI. See LIVE_RUN_PLAN.md.
+CREATE TABLE IF NOT EXISTS runs (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL,
+  task_id       TEXT,                       -- optional: the task whose branch is running
+  branch        TEXT NOT NULL,              -- branch the checkout is on while running
+  cwd           TEXT NOT NULL,              -- directory flutter run ran in (the project dir)
+  device_serial TEXT,                       -- adb serial (host:port), once connected
+  debug_port    TEXT,                       -- Dart VM service URI, once reported
+  status        TEXT NOT NULL,              -- starting | running | reloading | stopped | failed
+  error         TEXT,                       -- short failure reason
+  created_at    INTEGER NOT NULL,
+  started_at    INTEGER,
+  ended_at      INTEGER,
+  updated_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id, created_at);
+
+-- Append-only run log + lifecycle events, monotonic seq per run, so a phone that disconnects
+-- mid-session can replay with since=<seq> over the run WebSocket (same shape as build_events).
+CREATE TABLE IF NOT EXISTS run_events (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     TEXT NOT NULL,
+  type       TEXT NOT NULL,               -- run.created | run.started | run.log | run.progress | run.reload | run.restart | run.debugPort | run.stopped | run.error
+  payload    TEXT NOT NULL,               -- JSON
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (run_id) REFERENCES runs(id)
+);
+CREATE INDEX IF NOT EXISTS idx_run_events_run_seq ON run_events(run_id, seq);
+
 -- User-facing notifications (S3-05). Self-contained: the daemon derives these from task /
 -- build / upload outcomes and the phone reads them over the tailnet (live + replay by seq).
 -- Content-safe: title/body only, never code or secrets (CLAUDE.md). seq is monotonic.

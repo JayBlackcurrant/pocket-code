@@ -33,6 +33,8 @@ import { DistributionService, DistributionError } from './build/distributionServ
 import { verifyDownloadToken } from './build/downloadToken.js';
 import { ReleaseNotesService, ReleaseNotesError } from './build/releaseNotes.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
+import type { RunStore } from './db/runStore.js';
+import type { RunLog } from './db/runLog.js';
 import type { NotificationService } from './notify/notificationService.js';
 import type { NotificationRow } from './db/notificationStore.js';
 
@@ -48,6 +50,10 @@ export interface ServerDeps {
   distribution: DistributionService;
   releaseNotes: ReleaseNotesService;
   notifications: NotificationService;
+  // Live-run session stores (S5-01). Routes + RunService land in S5-03/05; wired now so the
+  // singletons exist on the one db alongside builds.
+  runs: RunStore;
+  runLog: RunLog;
 }
 
 /** Public, non-secret projection of a registered project for the /projects list. */

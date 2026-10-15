@@ -5,6 +5,8 @@ import { EventLog } from './db/eventLog.js';
 import { TaskStore } from './db/taskStore.js';
 import { BuildStore } from './db/buildStore.js';
 import { BuildLog } from './db/buildLog.js';
+import { RunStore } from './db/runStore.js';
+import { RunLog } from './db/runLog.js';
 import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
 import { BuildService, makeSpawnRunStep } from './build/buildService.js';
@@ -24,6 +26,10 @@ async function main(): Promise<void> {
   const events = new EventLog(db);
   const buildStore = new BuildStore(db);
   const buildLog = new BuildLog(db);
+  // Live-run session stores (S5-01). RunService (S5-03) will own the lifecycle; wired here so
+  // the data layer and WS replay share the one db, like builds.
+  const runStore = new RunStore(db);
+  const runLog = new RunLog(db);
   const git = new GitService();
   const runner = new AgentRunner({
     registry,
@@ -66,6 +72,8 @@ async function main(): Promise<void> {
     distribution,
     releaseNotes,
     notifications,
+    runs: runStore,
+    runLog,
   });
   // Route runner + build logs through fastify's pino logger (same stream as HTTP logs).
   runner.setLogger(app.log.child({ mod: 'agent' }));

@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-00 live-run connectivity spike:** cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, no toggling, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual). Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-01 live-run data layer** landed (`RunStore` + `RunLog` + schema `runs`/`run_events`, wired as singletons in `index.ts`; typecheck clean, **189 tests**). Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -31,6 +31,7 @@
 | Always-on service (S4-01 LaunchAgent) | 🟡 **files ready** (`scripts/` + `AGENT_LAUNCHD.md`) — install on this Mac to get crash/reboot survival; not yet installed |
 | Daemon currently running? | ✅ **yes** — background under `caffeinate`, fresh with SDK 0.3.296 |
 | Live Run S5-00 (connectivity spike) | ✅ **cellular proven** via fixed-port `adb tcpip 5555` over the tailnet (same cmd on Wi-Fi/cellular/both, no toggling; reconnect via saved pairing). ⛔ hands-off **reboot re-arm blocked on ColorOS 15** (an app can't start the adb listener — root or manual). Hot-reload latency not yet captured. Throwaway spike — no daemon code. |
+| Live Run S5-01 (daemon data layer) | ✅ `RunStore` + `RunLog` + schema (`runs`, `run_events`) on branch `claude/live-run`; wired as singletons in `index.ts`. Typecheck clean, **189 tests** (+12). No `RunService`/routes yet (S5-02/03/05). |
 
 ---
 
@@ -78,6 +79,30 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-01 live-run data layer (RunStore + RunLog) — dev side
+Foundation for the live-run session feature (`LIVE_RUN_PLAN.md` §4), on branch `claude/live-run`.
+Data layer only — no spawning, no `RunService`, no routes yet (those are S5-02/03/05).
+- **Schema** (`src/db/db.ts`): added `runs` (id, project_id, task_id?, branch, cwd, device_serial,
+  debug_port, status `starting|running|reloading|stopped|failed`, error, timestamps) and
+  `run_events` (AUTOINCREMENT `seq`, run_id FK, type, payload JSON) with per-run seq indexes.
+  Both `CREATE TABLE IF NOT EXISTS`, so existing DBs pick them up on next `openDb` (no migration).
+- **`RunStore`** (`src/db/runStore.ts`): twin of `BuildStore`. create (defaults `starting`),
+  markRunning (sets started_at once via COALESCE; fills serial/port), markReloading/markReloaded,
+  markStopped (ended_at), markFailed (reason+ended_at), setDebugPort/setDeviceSerial, get,
+  listForProject, and **activeForProject** (the non-terminal run — drives the S5-04 concurrency
+  gate + app resume). `ACTIVE_RUN_STATUSES` exported.
+- **`RunLog`** (`src/db/runLog.ts`): twin of `BuildLog`. Own emitter, event-log-first `append`
+  (writes SQLite then emits), `since()` replay, `lastLines()` (run.log only). For the S5-05 WS.
+- **Wiring** (`src/index.ts`): `runStore`/`runLog` instantiated on the one `db` and threaded into
+  `ServerDeps` (added to `server.ts`), ready for `RunService` to consume. Updated the 2 test
+  call-sites that build `ServerDeps` directly (`stream.test.ts`, `build/downloadRoute.test.ts`).
+- **Tested:** typecheck clean, **189 tests** (+12: 7 `runStore` lifecycle/queries incl.
+  activeForProject + COALESCE started_at, 5 `runLog` append/since/isolation/lastLines/emit).
+  `runLog.test.ts` creates the referenced `runs` rows first (run_events has an FK to runs).
+- **Next:** S5-02 `spawnRunSession` (retained child + stdin + caffeinate) parsing
+  `flutter run --machine` JSON → run events; then S5-03 `RunService`.
+- **Pending from S5-00:** hot-reload latency number still uncaptured (`scripts/adb-connect.sh run`).
 
 ### 2026-10-15 — S5-00 live-run connectivity spike (adb over tailnet) — this Mac
 Hands-on test against the real phone (realme 11 Pro 5G / RMX3741, realme UI 6.0 · ColorOS 15 ·
