@@ -293,12 +293,13 @@ occasional re-arm is a 5-second annoyance, never a hang.
       cascade; returns device serial + link quality (or `reArmNeeded`).
 - [x] **S5-07** Auto-reload after a Claude edit (subscribe to `AgentRunner.onEvent`, debounced).
 
-**Phase 1 — app:**
-- [ ] **S5-08** `src/run/` feature: run_row, run_feed, run_stream, run_actions.
-- [ ] **S5-09** Run screen: device picker, control bar (Run/Stop/Reload/Restart), status +
-      connection quality, virtualized live log, "Open app".
-- [ ] **S5-10** Task-page entry + resume-in-progress-run; swipeable Logs | Code | Controls panels.
-- [ ] **S5-11** "Phone unreachable → Reconnect" state + re-arm instructions.
+**Phase 1 — app:** _(S5-08/09/11 done on branch `claude/live-run`; 54 tests)_
+- [x] **S5-08** `src/run/` feature: run_row, run_feed, run_stream, run_actions.
+- [x] **S5-09** Run screen: device picker, control bar (Run/Stop/Reload/Restart), status +
+      connection quality, virtualized live log, "switch to app" hint.
+- [~] **S5-10** Task-page entry + resume-in-progress-run ✅; swipeable Logs | Code | Controls panels
+      still pending (log + controls share one screen for now).
+- [x] **S5-11** "Phone unreachable → re-arm" card + instructions (reconnect/re-check).
 
 **Phase 2 (later):**
 - [ ] **S5-12** In-app manual code editor + path-safe `POST /tasks/:id/file` write → triggers reload.

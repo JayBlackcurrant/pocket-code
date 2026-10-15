@@ -380,6 +380,50 @@ class ReviewRouteArgs {
 }
 
 /// generated route for
+/// [RunPage]
+class RunRoute extends PageRouteInfo<RunRouteArgs> {
+  RunRoute({required String taskId, Key? key, List<PageRouteInfo>? children})
+      : super(
+          RunRoute.name,
+          args: RunRouteArgs(taskId: taskId, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'RunRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<RunRouteArgs>();
+      return RunPage(taskId: args.taskId, key: args.key);
+    },
+  );
+}
+
+class RunRouteArgs {
+  const RunRouteArgs({required this.taskId, this.key});
+
+  final String taskId;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'RunRouteArgs{taskId: $taskId, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! RunRouteArgs) return false;
+    return taskId == other.taskId && key == other.key;
+  }
+
+  @override
+  int get hashCode => taskId.hashCode ^ key.hashCode;
+}
+
+/// generated route for
 /// [TaskPage]
 class TaskRoute extends PageRouteInfo<TaskRouteArgs> {
   TaskRoute({required String taskId, Key? key, List<PageRouteInfo>? children})

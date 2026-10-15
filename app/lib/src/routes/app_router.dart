@@ -11,6 +11,7 @@ import '../project/ui/project_page.dart';
 import '../review/ui/code_viewer_page.dart';
 import '../review/ui/diff_file_page.dart';
 import '../review/ui/review_page.dart';
+import '../run/ui/run_page.dart';
 import '../tasks/ui/task_page.dart';
 import 'guards/pairing_guard.dart';
 
@@ -72,6 +73,11 @@ class AppRouter extends RootStackRouter {
         AutoRoute(
           page: BuildsRoute.page,
           path: '/tasks/:taskId/build',
+          guards: [PairingGuard(_ref)],
+        ),
+        AutoRoute(
+          page: RunRoute.page,
+          path: '/tasks/:taskId/run',
           guards: [PairingGuard(_ref)],
         ),
         AutoRoute(

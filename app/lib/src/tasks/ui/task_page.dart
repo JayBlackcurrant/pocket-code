@@ -82,6 +82,12 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                 context.router.push(ReviewRoute(taskId: widget.taskId)),
           ),
           IconButton(
+            tooltip: 'Run on phone',
+            icon: const Icon(Icons.play_circle_outline),
+            onPressed: () =>
+                context.router.push(RunRoute(taskId: widget.taskId)),
+          ),
+          IconButton(
             tooltip: 'Build & ship',
             icon: const Icon(Icons.rocket_launch_outlined),
             onPressed: () =>

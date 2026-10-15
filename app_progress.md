@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no device tokens or
 > pairing codes. The app stores its token in `flutter_secure_storage` only.
 
-**Last updated:** 2026-10-15 — **S5-08 live-run app data layer** (`src/run/`: `RunRow`/`DeviceDiscovery` models, `run_feed` event→line mapper, `RunStream` WS provider, `RunActions` — devices/start/reload/restart/stop). Mirrors `src/builds/`. analyze clean, **51 tests** (+10). Daemon side of Feature 1 is complete (see `agent_mac.md`). Next: S5-09 run screen UI.
+**Last updated:** 2026-10-15 — **S5-09 run screen** (`RunPage`: auto-detect phone tailnet IP → device discovery → Run → live log + Reload/Restart/Stop control bar + status/link-quality chips + re-arm card; task-page "Run on phone" entry + resume). analyze clean, **54 tests** (+3), build bundle OK. Earlier today: S5-08 data layer. Daemon side of Feature 1 complete (`agent_mac.md`). Remaining: S5-10 swipeable Logs|Code panels (nice-to-have).
 
 ---
 
@@ -27,7 +27,8 @@
 | Builds screen (S3-06) | ✅ done — Build & ship screen: start build, live log (WS), editable AI release notes, group field, upload, Firebase link, retry |
 | Biometric gate (S3-07) | ✅ done — `local_auth` gate on push, build/retry, upload (distribute), and "always allow"; fails closed |
 | Notifications inbox (S3-05) | ✅ done — global keepAlive WS inbox + unread badge; in-app only (daemon-driven, no external push) |
-| Live Run data layer (S5-08) | ✅ done — `src/run/`: `RunRow` + `DeviceDiscovery` models, pure `run_feed` (event→line + status reducers + debugUri), `RunStream` (WS `/runs/:id/stream?since=`, replay+reconnect), `RunActions` (devices/start/reload/restart/stop/activeForTask). No UI yet (S5-09). |
+| Live Run data layer (S5-08) | ✅ done — `src/run/`: `RunRow` + `DeviceDiscovery` models, pure `run_feed` (event→line + status reducers + debugUri), `RunStream` (WS `/runs/:id/stream?since=`, replay+reconnect), `RunActions` (devices/start/reload/restart/stop/activeForTask). |
+| Live Run screen (S5-09/10/11) | ✅ done — `RunPage` (route `/tasks/:taskId/run`): auto-detects the phone's Tailscale IP (`tailnet.dart`, 100.64/10) → `GET /devices` cascade → **Run**; live log (virtualized, colored by `RunLineKind`, auto-scroll), control bar **Reload / Restart / Stop**, status + **link-quality** chip (direct/relay), **re-arm card** when `reArmNeeded`, manual host entry fallback, resume an active run on open, "switch to app" hint. Task page gained a **Run on phone** action. Remaining (S5-10): swipeable Logs|Code|Controls panels. |
 
 > **Correction vs the Mac-seeded version:** the app uses **AutoRoute**, not go_router (owner's
 > instruction; `CLAUDE.md` repo-layout line updated accordingly). S1-09 and S1-10 are **built
@@ -80,6 +81,28 @@
 ---
 
 ## Log
+
+### 2026-10-15 — S5-09 run screen (RunPage) — + task entry, resume, re-arm (S5-10/11)
+The visible payoff: drive `flutter run` on the phone from PocketCode. Route `/tasks/:taskId/run`.
+- **Device discovery:** on open, `tailnet.dart` `detectTailnetHost()` scans local interfaces for a
+  100.64/10 (Tailscale) IPv4 and passes it to `GET /projects/:id/devices`. Falls back to a manual
+  host `TextField` when none is found (ColorOS may hide the interface). `isTailnetIpv4` is pure +
+  tested.
+- **Setup view:** device card (name/serial + link-quality chip) with **Run**; a **re-arm card**
+  (S5-11) when the cascade reports `reArmNeeded` (adb not reachable — Wireless debugging ON, or USB
+  `adb tcpip 5555`); a re-check button; error + manual entry.
+- **Live view:** header with a status chip (starting/running/reloading/stopped/failed) + link-quality
+  + reconnecting indicator; virtualized live log (`ListView.builder`, colored by `RunLineKind`,
+  auto-scroll via a `ref.listen` on line count); control bar **Reload / Restart / Stop** (reload
+  result snackbars the flutter "Reloaded in …ms"); "Start another run" after it stops; an app-bar
+  **switch-to-app** hint (the app runs on the phone — use the app switcher).
+- **Entry + resume (S5-10):** task page app-bar gained **Run on phone** (`play_circle_outline`) →
+  `RunRoute`; on open `RunPage` adopts an already-active run for the task (`activeForTask`).
+- **Tested:** `flutter analyze` clean, `flutter test` **54/54** (+3 `isTailnetIpv4`),
+  `flutter build bundle` OK, routes regenerated.
+- **Not done (S5-10):** swipeable Logs | Code | Controls panels (the live log + controls are on one
+  screen for now; Code viewing is via the existing review/code pages). A real device run is still
+  unexercised end-to-end (needs the armed phone).
 
 ### 2026-10-15 — S5-08 live-run app data layer (`src/run/`)
 App side of Feature 1 (live run), mirroring `src/builds/`. Data layer + providers only — no UI yet
