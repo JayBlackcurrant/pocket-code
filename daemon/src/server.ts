@@ -33,7 +33,8 @@ import { DistributionService, DistributionError } from './build/distributionServ
 import { verifyDownloadToken } from './build/downloadToken.js';
 import { ReleaseNotesService, ReleaseNotesError } from './build/releaseNotes.js';
 import type { StoredBuildEvent } from './db/buildLog.js';
-import type { RunService } from './run/runService.js';
+import { type RunService, RunError, RunBusyError } from './run/runService.js';
+import type { StoredRunEvent } from './db/runLog.js';
 import type { NotificationService } from './notify/notificationService.js';
 import type { NotificationRow } from './db/notificationStore.js';
 
@@ -123,6 +124,16 @@ const UploadBuildBody = z.object({
 
 const BuildTailQuery = z.object({
   tail: z.coerce.number().int().min(0).max(500).default(20),
+});
+
+const StartRunBody = z.object({
+  deviceSerial: z.string().min(1).max(200),
+  taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(),
+  flavor: z.string().min(1).max(100).optional(),
+});
+
+const RunTailQuery = z.object({
+  tail: z.coerce.number().int().min(0).max(1000).default(50),
 });
 
 const MarkReadBody = z.object({ upTo: z.coerce.number().int().min(0) });
@@ -775,6 +786,143 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       });
 
       for (const e of deps.builds.logsSince(buildId, since)) {
+        send(e);
+        lastSent = e.seq;
+      }
+      live = true;
+      for (const e of buffered) {
+        if (e.seq > lastSent) {
+          send(e);
+          lastSent = e.seq;
+        }
+      }
+      buffered.length = 0;
+      socket.send(JSON.stringify({ type: 'stream.caughtup', lastSeq: lastSent }));
+
+      socket.on('close', unsub);
+      socket.on('error', unsub);
+    },
+  );
+
+  // --- Live run (S5-05) ------------------------------------------------------
+
+  // Start a run session: `flutter run --machine` targeting the phone over the tailnet. One run
+  // per project; a Claude task may coexist only on the same branch (S5-04 → 409 otherwise).
+  app.post<{ Params: { id: string } }>('/projects/:id/runs', auth, async (req, reply) => {
+    const parsed = StartRunBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+    }
+    try {
+      const run = await deps.runService.start({
+        projectId: req.params.id,
+        deviceSerial: parsed.data.deviceSerial,
+        ...(parsed.data.taskId !== undefined ? { taskId: parsed.data.taskId } : {}),
+        ...(parsed.data.flavor !== undefined ? { flavor: parsed.data.flavor } : {}),
+      });
+      return reply.code(201).send(run);
+    } catch (err) {
+      if (err instanceof RunBusyError || err instanceof RunError || err instanceof GuardrailError) {
+        return reply.code(409).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // Run sessions for a project, newest first.
+  app.get<{ Params: { id: string } }>('/projects/:id/runs', auth, async (req, reply) => {
+    const project = deps.registry.get(req.params.id);
+    if (!project) return reply.code(404).send({ error: 'unknown project' });
+    return { runs: deps.runService.listForProject(req.params.id) };
+  });
+
+  // One run's status + the tail of its log (`tail=0` omits the lines).
+  app.get<{ Params: { id: string }; Querystring: { tail?: string } }>('/runs/:id', auth, async (req, reply) => {
+    const run = deps.runService.get(req.params.id);
+    if (!run) return reply.code(404).send({ error: 'unknown run' });
+    const t = RunTailQuery.safeParse(req.query);
+    const tail = t.success ? t.data.tail : 50;
+    const lastLog = tail > 0 ? deps.runService.lastLogLines(req.params.id, tail) : [];
+    return { ...run, lastLog };
+  });
+
+  // Replay a run's log (catch-up read; the WebSocket below tails it live).
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>(
+    '/runs/:id/logs',
+    auth,
+    async (req, reply) => {
+      if (!deps.runService.get(req.params.id)) return reply.code(404).send({ error: 'unknown run' });
+      const q = EventsQuery.safeParse(req.query);
+      if (!q.success) return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
+      return { events: deps.runService.logsSince(req.params.id, q.data.since) };
+    },
+  );
+
+  // Hot reload / hot restart. Returns the control result ({ok, code, message}); a failed reload
+  // is a 200 with ok:false (the app still runs). 409 only when the run isn't active.
+  for (const kind of ['reload', 'restart'] as const) {
+    app.post<{ Params: { id: string } }>(`/runs/:id/${kind}`, auth, async (req, reply) => {
+      if (!deps.runService.get(req.params.id)) return reply.code(404).send({ error: 'unknown run' });
+      try {
+        const result = kind === 'reload' ? await deps.runService.reload(req.params.id) : await deps.runService.restart(req.params.id);
+        return result;
+      } catch (err) {
+        if (err instanceof RunError) return reply.code(409).send({ error: err.message });
+        throw err;
+      }
+    });
+  }
+
+  // Stop a run session (graceful app.stop, then force-kill). 409 if it isn't active.
+  app.post<{ Params: { id: string } }>('/runs/:id/stop', auth, async (req, reply) => {
+    if (!deps.runService.get(req.params.id)) return reply.code(404).send({ error: 'unknown run' });
+    const stopping = await deps.runService.stop(req.params.id);
+    if (!stopping) return reply.code(409).send({ error: 'run is not active on this daemon' });
+    return reply.code(202).send({ status: 'stopping' });
+  });
+
+  // Live run log with replay (same shape as the build stream): replay everything after `since`
+  // from SQLite, then tail live. A reconnecting phone passes its last seen seq.
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>(
+    '/runs/:id/stream',
+    { websocket: true, preHandler: requireAuth(deps.db) },
+    (socket, req) => {
+      const runId = req.params.id;
+      if (!deps.runService.get(runId)) {
+        socket.send(JSON.stringify({ type: 'stream.error', error: 'unknown run' }));
+        socket.close(1008, 'unknown run');
+        return;
+      }
+      const q = EventsQuery.safeParse(req.query);
+      const since = q.success ? q.data.since : 0;
+
+      let lastSent = since;
+      let live = false;
+      const buffered: StoredRunEvent[] = [];
+      const send = (e: StoredRunEvent): void => {
+        try {
+          socket.send(
+            JSON.stringify({ seq: e.seq, runId: e.runId, type: e.type, payload: e.payload, createdAt: e.createdAt }),
+          );
+        } catch {
+          /* socket closed mid-send */
+        }
+      };
+
+      // Subscribe BEFORE reading the DB so nothing emitted during replay is missed.
+      const unsub = deps.runService.onEvent((e) => {
+        if (e.runId !== runId) return;
+        if (!live) {
+          buffered.push(e);
+          return;
+        }
+        if (e.seq > lastSent) {
+          send(e);
+          lastSent = e.seq;
+        }
+      });
+
+      for (const e of deps.runService.logsSince(runId, since)) {
         send(e);
         lastSent = e.seq;
       }

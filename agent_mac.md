@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-04 concurrency gate** landed (`CheckoutGuard`: a task + a live run may share a project's checkout only on the **same branch**; one task + one run per project; discard refused while a run is live on the branch; shared instance wired into AgentRunner + RunService via `index.ts`; typecheck clean, **228 tests**). Earlier today: S5-03 `RunService`; S5-02 run-session spawn; S5-01 data layer. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-05 run routes + WS** landed (`POST /projects/:id/runs`, `GET /projects/:id/runs`, `GET /runs/:id?tail=`, `GET /runs/:id/logs?since=`, `POST /runs/:id/{reload,restart,stop}`, `WS /runs/:id/stream?since=`; `RunBusyError`/`RunError`→409; typecheck clean, **235 tests**). Earlier today: S5-04 `CheckoutGuard`; S5-03 `RunService`; S5-02 spawn; S5-01 data layer. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -34,7 +34,8 @@
 | Live Run S5-01 (daemon data layer) | ✅ `RunStore` + `RunLog` + schema (`runs`, `run_events`) on branch `claude/live-run`; wired as singletons in `index.ts`. No `RunService`/routes yet. |
 | Live Run S5-02 (run-session spawn) | ✅ `src/run/runSession.ts`: pure `parseFlutterMachineLine` + `createRunSessionEngine` (line buffer, appId tracking, reload/restart/stop request↔response) + `makeSpawnRunSession` (retained child, stdin control, caffeinate). Real-spawn stdin round-trip tested. |
 | Live Run S5-03 (RunService) | ✅ `src/run/runService.ts`: one `flutter run --machine` session per project; maps events → `RunLog`/`RunStore`; `start`/`reload`/`restart`/`stop`/`stopAll`; `recoverInterrupted`. Wired in `index.ts` + `ServerDeps`. |
-| Live Run S5-04 (concurrency gate) | ✅ `src/checkoutGuard.ts` (`CheckoutGuard`): a task + a run coexist only on the **same branch**; one task + one run per project; fresh task start refused while a run is live; shared instance wired into AgentRunner (replaces `activeProjects`) + RunService via `index.ts`. Discard refused (409) while a run is live on the task's branch. Typecheck clean, **228 tests** (+11). Next: S5-05 routes/WS. |
+| Live Run S5-04 (concurrency gate) | ✅ `src/checkoutGuard.ts` (`CheckoutGuard`): a task + a run coexist only on the **same branch**; one task + one run per project; fresh task start refused while a run is live; shared instance wired into AgentRunner (replaces `activeProjects`) + RunService via `index.ts`. Discard refused (409) while a run is live on the task's branch. |
+| Live Run S5-05 (routes + WS) | ✅ `server.ts`: `POST /projects/:id/runs` (→201, `RunBusyError`/`RunError`→409), `GET /projects/:id/runs`, `GET /runs/:id?tail=`, `GET /runs/:id/logs?since=`, `POST /runs/:id/{reload,restart,stop}`, `WS /runs/:id/stream?since=` (verbatim clone of the build stream). Typecheck clean, **235 tests** (+7 route tests via app.inject). Next: S5-06 device discovery (adb connect cascade), then the app (`/app`). |
 
 ---
 
@@ -82,6 +83,25 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-05 run routes + WebSocket (phone-facing API) — dev side
+Exposes the run session to the phone, mirroring the build routes/stream. Branch `claude/live-run`.
+- **Routes (`server.ts`, authed):** `POST /projects/:id/runs` `{deviceSerial, taskId?, flavor?}`
+  → 201 run row (`RunBusyError`/`RunError`/`GuardrailError`→409); `GET /projects/:id/runs` (list);
+  `GET /runs/:id?tail=` (row + log tail, default 50; `tail=0` omits); `GET /runs/:id/logs?since=`
+  (replay); `POST /runs/:id/reload` and `/restart` (return the `{ok,code,message}` control result —
+  a failed reload is 200 ok:false; unknown run 404; not-active 409); `POST /runs/:id/stop`
+  (202 `stopping`, 409 if not active); **`WS /runs/:id/stream?since=`** — a verbatim clone of the
+  build stream (subscribe-before-replay buffering, `since=` catch-up, `stream.caughtup`).
+- Schemas: `StartRunBody`, `RunTailQuery`. `RunError`/`RunBusyError` imported as values for the 409
+  mapping. `StoredRunEvent` typed on the WS send.
+- **Tested:** typecheck clean, **235 tests** (+7): `src/run/runRoutes.test.ts` via `app.inject`
+  against a real `buildServer` with a fake-spawn `RunService` — auth required (401), invalid body
+  (400), start 201 + second start 409, get row + tail + 404, list + logs replay, reload result +
+  404, stop 202 → row stopped. WS not re-tested (identical to the covered build stream).
+- **Not done:** S5-06 device discovery (`GET /projects/:id/devices` running the adb connect
+  cascade — the first piece that shells out to real adb/flutter, behind an injectable runner), then
+  the Flutter app side (`app_progress.md`). No real `flutter run` exercised yet.
 
 ### 2026-10-15 — S5-04 concurrency gate: run + task share a checkout (same branch) — dev side
 The doc's open "concurrency" question (`LIVE_RUN_PLAN.md` §4.3). Tasks run in place in the one
