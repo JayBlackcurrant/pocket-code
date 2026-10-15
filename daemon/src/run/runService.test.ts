@@ -213,6 +213,76 @@ describe('RunService + shared CheckoutGuard (S5-04)', () => {
   });
 });
 
+describe('RunService auto-reload after a Claude edit (S5-07)', () => {
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  function makeTaskEvents() {
+    const listeners = new Set<(e: import('../db/eventLog.js').StoredEvent) => void>();
+    return {
+      source: { onEvent: (l: (e: import('../db/eventLog.js').StoredEvent) => void) => { listeners.add(l); return () => listeners.delete(l); } },
+      complete: (taskId: string) =>
+        listeners.forEach((l) => l({ seq: 1, taskId, type: 'task.completed', payload: {}, createdAt: Date.now() })),
+    };
+  }
+  const build = (te: ReturnType<typeof makeTaskEvents>) =>
+    new RunService({
+      registry: fakeRegistry(),
+      runs,
+      runLog,
+      tasks,
+      git: fakeGit,
+      spawnRunSession: fake.spawn,
+      taskEvents: te.source,
+      autoReloadDebounceMs: 5,
+    });
+
+  it('reloads a live run when a task on its branch completes', async () => {
+    const te = makeTaskEvents();
+    const svc2 = build(te);
+    const row = await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    fake.emit({ kind: 'started', appId: 'a1' }); // status → running
+    te.complete('t1'); // t1's branch is claude/x, same as the run
+    await delay(30);
+    expect(fake.calls.reload).toBe(1);
+    expect(svc2.logsSince(row.id, 0).some((e) => e.type === 'run.autoreload')).toBe(true);
+    svc2.dispose();
+  });
+
+  it('ignores a task on a different branch', async () => {
+    const te = makeTaskEvents();
+    const svc2 = build(te);
+    tasks.create({ id: 't2', projectId: 'hedged', branch: 'claude/other', worktree: '/p' });
+    await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    fake.emit({ kind: 'started', appId: 'a1' });
+    te.complete('t2'); // different branch
+    await delay(30);
+    expect(fake.calls.reload).toBe(0);
+    svc2.dispose();
+  });
+
+  it('debounces a burst of completions into a single reload', async () => {
+    const te = makeTaskEvents();
+    const svc2 = build(te);
+    await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    fake.emit({ kind: 'started', appId: 'a1' });
+    te.complete('t1');
+    te.complete('t1');
+    te.complete('t1');
+    await delay(30);
+    expect(fake.calls.reload).toBe(1);
+    svc2.dispose();
+  });
+
+  it('does not reload before the app has started (status still starting)', async () => {
+    const te = makeTaskEvents();
+    const svc2 = build(te);
+    await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    te.complete('t1'); // no "started" emitted → status is 'starting'
+    await delay(30);
+    expect(fake.calls.reload).toBe(0);
+    svc2.dispose();
+  });
+});
+
 describe('RunService exit + recovery', () => {
   it('a non-zero exit marks the run failed', async () => {
     const row = await start();

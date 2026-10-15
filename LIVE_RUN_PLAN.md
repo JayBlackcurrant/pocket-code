@@ -280,7 +280,7 @@ occasional re-arm is a 5-second annoyance, never a hang.
   > then `r`). Daemon implication (S5-06): `connectCascade` = try `:5555` → else parallel scan →
   > else a one-tap "phone needs re-arm" state (never hang).
 
-**Phase 1 — daemon run session:** _(S5-01…06 done on branch `claude/live-run`; 243 tests)_
+**Phase 1 — daemon run session:** _(COMPLETE on branch `claude/live-run`; 247 tests)_
 - [x] **S5-01** `RunLog` + `RunStore` (+ migrations), wired as singletons in `index.ts`.
 - [x] **S5-02** `spawnRunSession` (retained child + stdin + caffeinate) and `flutter run --machine`
       JSON parsing → run events.
@@ -291,7 +291,7 @@ occasional re-arm is a 5-second annoyance, never a hang.
       `/runs/:id/{reload,restart,stop}`, `GET /runs/:id`, `/runs/:id/logs`, `WS /runs/:id/stream`).
 - [x] **S5-06** Device discovery endpoint (`GET /projects/:id/devices?host=`) runs the connect
       cascade; returns device serial + link quality (or `reArmNeeded`).
-- [ ] **S5-07** Auto-reload after a Claude edit (subscribe to `AgentRunner.onEvent`, debounced).
+- [x] **S5-07** Auto-reload after a Claude edit (subscribe to `AgentRunner.onEvent`, debounced).
 
 **Phase 1 — app:**
 - [ ] **S5-08** `src/run/` feature: run_row, run_feed, run_stream, run_actions.

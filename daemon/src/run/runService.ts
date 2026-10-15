@@ -4,6 +4,7 @@ import type { ProjectRegistry } from '../registry/projectRegistry.js';
 import type { TaskStore } from '../db/taskStore.js';
 import { RunStore, type RunRow } from '../db/runStore.js';
 import { RunLog, type StoredRunEvent } from '../db/runLog.js';
+import type { StoredEvent } from '../db/eventLog.js';
 import { GitError, GitService, runGit } from '../git/gitService.js';
 import { resolveBuildFlavor } from '../guardrails.js';
 import { CheckoutGuard } from '../checkoutGuard.js';
@@ -54,6 +55,11 @@ export interface RunServiceDeps {
   /** Shared checkout guard (coordinates with Claude tasks, S5-04). index.ts passes the SAME
    *  instance to AgentRunner and RunService; a standalone default is used in isolated tests. */
   checkoutGuard?: CheckoutGuard;
+  /** Task event source (AgentRunner) for auto-reload after a Claude edit (S5-07). When a task on a
+   *  live run's branch completes, the run hot-reloads. Omit to disable. */
+  taskEvents?: { onEvent(listener: (e: StoredEvent) => void): () => void };
+  /** Debounce for auto-reload, coalescing a burst of task completions. Default 400ms. */
+  autoReloadDebounceMs?: number;
 }
 
 export interface StartRunInput {
@@ -97,6 +103,9 @@ export class RunService {
   private readonly sessions = new Map<string, Session>();
   private readonly settlers = new Map<string, () => void>();
   private readonly settled = new Map<string, Promise<void>>();
+  private readonly autoReloadDebounceMs: number;
+  private readonly autoReloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private taskEventsUnsub: (() => void) | null = null;
 
   constructor(deps: RunServiceDeps) {
     this.registry = deps.registry;
@@ -107,6 +116,10 @@ export class RunService {
     this.spawnRunSession = deps.spawnRunSession ?? makeSpawnRunSession();
     this.guard = deps.checkoutGuard ?? new CheckoutGuard();
     this.log = deps.logger ?? noopLogger;
+    this.autoReloadDebounceMs = deps.autoReloadDebounceMs ?? 400;
+    if (deps.taskEvents) {
+      this.taskEventsUnsub = deps.taskEvents.onEvent((e) => this.onTaskEvent(e));
+    }
   }
 
   setLogger(logger: RunLogger): void {
@@ -281,10 +294,42 @@ export class RunService {
     }
   }
 
+  /** Auto-reload (S5-07): when a Claude task on a live run's branch finishes, hot-reload the run. */
+  private onTaskEvent(e: StoredEvent): void {
+    if (e.type !== 'task.completed') return;
+    const task = this.tasks.get(e.taskId);
+    if (!task) return;
+    const run = this.runs.activeForProject(task.projectId);
+    if (!run || run.branch !== task.branch || run.status !== 'running') return;
+    if (!this.sessions.has(run.id)) return;
+    this.scheduleAutoReload(run.id, e.taskId);
+  }
+
+  private scheduleAutoReload(runId: string, taskId: string): void {
+    const existing = this.autoReloadTimers.get(runId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.autoReloadTimers.delete(runId);
+      const run = this.runs.get(runId);
+      if (!run || run.status !== 'running' || !this.sessions.has(runId)) return;
+      this.persist(runId, 'run.autoreload', { taskId });
+      this.log.info({ runId, taskId }, 'auto-reloading after a task edit');
+      void this.reload(runId).catch(() => {});
+    }, this.autoReloadDebounceMs);
+    // A pending auto-reload shouldn't keep the process alive on its own.
+    if (typeof timer.unref === 'function') timer.unref();
+    this.autoReloadTimers.set(runId, timer);
+  }
+
   private onExit(runId: string, code: number | null): void {
     const session = this.sessions.get(runId);
     const row = this.runs.get(runId);
     this.sessions.delete(runId);
+    const timer = this.autoReloadTimers.get(runId);
+    if (timer) {
+      clearTimeout(timer);
+      this.autoReloadTimers.delete(runId);
+    }
     if (session) this.guard.releaseRun(session.projectId);
     if (row && row.status !== 'stopped' && row.status !== 'failed') {
       if (code === 0 || code === null) {
@@ -361,5 +406,15 @@ export class RunService {
   /** Stop every active session (for graceful shutdown). */
   async stopAll(): Promise<void> {
     await Promise.all([...this.sessions.keys()].map((id) => this.stop(id)));
+  }
+
+  /** Unsubscribe from task events and clear pending auto-reload timers. */
+  dispose(): void {
+    if (this.taskEventsUnsub) {
+      this.taskEventsUnsub();
+      this.taskEventsUnsub = null;
+    }
+    for (const t of this.autoReloadTimers.values()) clearTimeout(t);
+    this.autoReloadTimers.clear();
   }
 }

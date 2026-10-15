@@ -36,8 +36,6 @@ async function main(): Promise<void> {
   const git = new GitService();
   // One shared guard so a Claude task and a live-run session coordinate the single checkout (S5-04).
   const checkoutGuard = new CheckoutGuard();
-  const runService = new RunService({ registry, runs: runStore, runLog, tasks, git, checkoutGuard });
-  const deviceService = new DeviceService({ registry });
   const runner = new AgentRunner({
     registry,
     git,
@@ -48,6 +46,10 @@ async function main(): Promise<void> {
     checkoutGuard,
     ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
   });
+  // RunService auto-reloads a live run when a Claude task on the same branch completes (S5-07), so
+  // it subscribes to the runner's event stream.
+  const runService = new RunService({ registry, runs: runStore, runLog, tasks, git, checkoutGuard, taskEvents: runner });
+  const deviceService = new DeviceService({ registry });
   // Long jobs run under `caffeinate -i` so the Mac stays awake mid-build (S3-08).
   const runStep = makeSpawnRunStep({ caffeinate: env.caffeinate });
   const builds = new BuildService({ registry, builds: buildStore, buildLog, tasks, runStep, git });
@@ -101,6 +103,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
+    runService.dispose();
     await runService.stopAll();
     await app.close();
     db.close();
