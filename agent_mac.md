@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-11 — **tasks now run in the project checkout on a `claude/<slug>` branch (no worktrees)**, one at a time per project, with edit-path containment (branch `claude/in-place-task-branches`, 166 tests) — fixes the staging signing failure; earlier: codegen `dir:` for api/; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-00 live-run connectivity spike:** cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, no toggling, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual). Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -30,6 +30,7 @@
 | Live agent task (end-to-end) | 🟡 first run hit a 400 (SDK bug); re-testing after the SDK upgrade |
 | Always-on service (S4-01 LaunchAgent) | 🟡 **files ready** (`scripts/` + `AGENT_LAUNCHD.md`) — install on this Mac to get crash/reboot survival; not yet installed |
 | Daemon currently running? | ✅ **yes** — background under `caffeinate`, fresh with SDK 0.3.296 |
+| Live Run S5-00 (connectivity spike) | ✅ **cellular proven** via fixed-port `adb tcpip 5555` over the tailnet (same cmd on Wi-Fi/cellular/both, no toggling; reconnect via saved pairing). ⛔ hands-off **reboot re-arm blocked on ColorOS 15** (an app can't start the adb listener — root or manual). Hot-reload latency not yet captured. Throwaway spike — no daemon code. |
 
 ---
 
@@ -77,6 +78,33 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-00 live-run connectivity spike (adb over tailnet) — this Mac
+Hands-on test against the real phone (realme 11 Pro 5G / RMX3741, realme UI 6.0 · ColorOS 15 ·
+Android 15) over the tailnet — the gate before building the daemon RunService.
+- **Fixed-port transport works; Wireless Debugging does not.** `adb tcpip 5555` makes adbd listen
+  on `0.0.0.0:5555` (all interfaces incl. the Tailscale tun). Set **once over USB**, then the same
+  `adb connect <phone-tailnet-ip>:5555` works with **USB unplugged and Wi-Fi off (cellular only)** —
+  verified device + shell + `flutter devices`. No port guessing, no mode toggling; survives
+  Wi-Fi↔cellular; reconnect uses the saved pairing (no re-pair).
+- **Why not Wireless Debugging:** Android 11+ Wireless Debugging only arms on Wi-Fi and
+  **re-randomizes its port on every network switch**; the serial sweep in `scripts/adb-connect.sh`
+  (30000-44000) then crawls for ~hours over the tailnet — that was the observed "hang". A
+  **parallel** socket scan finds the port in seconds.
+- **Reboot-survival is blocked on ColorOS 15 (no root).** The planned WRITE_SECURE_SETTINGS
+  boot-helper (`LIVE_RUN_PLAN.md` §3.2) does not work: granted `WRITE_SECURE_SETTINGS` (after
+  enabling realme's "USB debugging (Security settings)" dev option, which unlocks `pm grant`), and
+  an automation app (MacroDroid) **can** write `global adb_wifi_enabled=1`, but ColorOS **won't
+  start the adb listener for an app's write** — A/B proven: an identical **shell** write opens a
+  port, the **app** write does not (only shell / Settings UI / root start the listener). Post-reboot
+  re-arm therefore needs **root** (`persist.adb.tcp.port`, declined D2) or a **manual step**: replug
+  USB → `adb tcpip 5555`, or flip Wireless debugging ON in the UI on Wi-Fi → scan → re-pin.
+- **Link quality:** pure cellular is often **relay (DERP blr), ~70-150 ms**, upgrading to direct
+  when possible. Hot reload usable, mild lag on relay.
+- **Daemon takeaway (S5-01+):** `connectCascade` = try `:5555` → else **parallel** scan → else a
+  one-tap "phone needs re-arm" state (never hang), per §6.
+- **Not captured yet:** the hot-reload latency number (`flutter run -d <phone>:5555` + `r`).
+- Throwaway spike — **no daemon code changed.** Secrets kept out (no tailnet IP / pairing codes).
 
 ### 2026-10-12 — S4-02 crash recovery (fail interrupted tasks, offer resume) — dev side
 - On daemon startup, `AgentRunner.recoverInterrupted()` flips any task left non-terminal

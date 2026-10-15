@@ -8,7 +8,7 @@
 > Related: [`PROJECT_DESCRIPTION.md`](PROJECT_DESCRIPTION.md), [`SPRINT_PLAN.md`](SPRINT_PLAN.md),
 > [`agent_mac.md`](agent_mac.md), [`app_progress.md`](app_progress.md).
 
-**Last updated:** 2026-10-15 · **Status:** spec agreed; implementation starting (Phase 0).
+**Last updated:** 2026-10-15 · **Status:** Phase 0 (S5-00) run — cellular connectivity **proven** via fixed-port `adb tcpip 5555` over the tailnet; hands-off **reboot re-arm blocked on ColorOS 15** (needs root or a manual step). See the S5-00 result notes in §3.2, §3.3 and §8.
 
 ---
 
@@ -77,6 +77,21 @@ still connects; `flutter run` + hot reload then behave as over USB, with more la
 **Steady state:** on each boot (and when Wi-Fi appears) the helper writes
 `settings put global adb_wifi_enabled 1`, re-enabling Wireless Debugging with no PC contact.
 
+> ⚠️ **S5-00 result (2026-10-15 — realme 11 Pro 5G, realme UI 6.0 / ColorOS 15 / Android 15):**
+> this non-root arming story **does not work on ColorOS 15.** A third-party app (tested with
+> MacroDroid, granted `WRITE_SECURE_SETTINGS` after enabling realme's **"USB debugging (Security
+> settings)"** dev option — which unlocks `pm grant`) **can** write `adb_wifi_enabled=1`, but
+> ColorOS **does not start the adb listener for an app's write.** A/B proven: an identical write
+> from the **adb shell** opens the Wireless-Debugging port, the **app** write does not — only the
+> shell, the Settings UI, or root start the listener. **So re-arm via the helper is out.** Use
+> **`adb tcpip 5555`** instead: it makes adbd listen on `0.0.0.0:5555` (all interfaces incl. the
+> Tailscale tun), set **once over USB**, and then the same `adb connect <ip>:5555` works on Wi-Fi,
+> cellular, or both — verified with USB unplugged and Wi-Fi off; it survives network switches and
+> reconnects via the saved pairing. Its one gap: it **dies on reboot** (non-root can't persist a
+> fixed adb port). Hands-off reboot re-arm therefore needs **root** (`persist.adb.tcp.port`,
+> declined D2) or a **manual step** after the (rare) reboot: replug USB → `adb tcpip 5555`, or flip
+> Wireless debugging ON in the UI on Wi-Fi → daemon scans → re-pin `tcpip 5555`.
+
 ### 3.3 The port problem + the daemon connect cascade
 
 Android 14+ **randomizes the adb port** after reboot/sleep. mDNS discovery (the normal fix) is LAN
@@ -89,6 +104,13 @@ connect cascade (Mac/daemon side):
   3. verify with `adb devices` / `flutter devices`
   4. if nothing answers → report "phone unreachable: re-arm needed" (do NOT hang)
 ```
+
+> **S5-00 note (2026-10-15):** the **serial** sweep is unusable over the tailnet (30000-44000 ×
+> ~1s = hours — this was the observed "hang"). A **parallel** socket scan finds the armed port in
+> seconds; the daemon's cascade must parallelize it (or use the NSD report below). Prefer trying
+> the fixed `:5555` (from `adb tcpip`, see §3.2) **first**, so a scan is only needed right after a
+> reboot. Note that even a *successful* scan+connect only works once adbd is actually listening —
+> which, on ColorOS 15 without root, does not happen automatically after a reboot (see §3.2).
 
 A later refinement (Phase 2+): the helper app does **on-device NSD** discovery of
 `_adb-tls-connect._tcp` and POSTs the current port to the daemon, removing the sweep.
@@ -249,6 +271,14 @@ occasional re-arm is a 5-second annoyance, never a hang.
       `adb connect` → `flutter devices`). Arm the phone once; prove `flutter run` + hot reload hold
       up to the realme **over cellular**. Measure reload latency; note direct vs relayed. *Gate: if
       this is unusable, revisit the whole feature before writing daemon code.*
+  > **Result (2026-10-15) — connectivity gate PASSED; latency pending.** Fixed-port `adb tcpip 5555`
+  > reaches the phone on cellular (USB unplugged, Wi-Fi off) over the tailnet — same command on any
+  > network, no port guessing, no toggling; reconnect via the saved pairing. Replace the serial
+  > sweep with a **parallel** scan (§3.3). **Reboot re-arm is blocked on ColorOS 15** → root or a
+  > manual step (§3.2). Cellular path is often **relay (DERP), ~70–150 ms** → hot reload works with
+  > mild lag. **Still to capture:** the actual hot-reload latency number (`flutter run -d <ip>:5555`
+  > then `r`). Daemon implication (S5-06): `connectCascade` = try `:5555` → else parallel scan →
+  > else a one-tap "phone needs re-arm" state (never hang).
 
 **Phase 1 — daemon run session:**
 - [ ] **S5-01** `RunLog` + `RunStore` (+ migrations), wired as singletons in `index.ts`.
