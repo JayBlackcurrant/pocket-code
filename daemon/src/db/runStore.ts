@@ -148,6 +148,17 @@ export class RunStore {
     return rows.map(toRun);
   }
 
+  /** All non-terminal runs across every project. Used by crash recovery on daemon startup
+   *  (a run can't survive a restart — the child process is gone). */
+  listActive(): RunRow[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE status IN ('starting', 'running', 'reloading') ORDER BY created_at DESC, rowid DESC",
+      )
+      .all() as RawRunRow[];
+    return rows.map(toRun);
+  }
+
   /** The project's current non-terminal run (starting/running/reloading), if any. Drives the
    *  concurrency gate (S5-04) and the app's resume-in-progress behaviour. */
   activeForProject(projectId: string): RunRow | undefined {

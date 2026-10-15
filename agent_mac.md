@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-02 run-session spawn layer** landed (`runSession.ts`: Flutter `--machine` JSON parser + pure session engine + `makeSpawnRunSession` with retained child & stdin control; typecheck clean, **204 tests**). Earlier today: **S5-01 live-run data layer** (`RunStore` + `RunLog` + schema `runs`/`run_events`, wired as singletons in `index.ts`). Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-03 `RunService`** landed (owns one `flutter run --machine` session per project; maps session events → `RunLog`/`RunStore`; reload/restart/stop; crash recovery; wired into `index.ts` + `ServerDeps`; typecheck clean, **217 tests**). Earlier today: S5-02 run-session spawn layer (`runSession.ts`); S5-01 data layer (`RunStore`/`RunLog`). Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -32,7 +32,8 @@
 | Daemon currently running? | ✅ **yes** — background under `caffeinate`, fresh with SDK 0.3.296 |
 | Live Run S5-00 (connectivity spike) | ✅ **cellular proven** via fixed-port `adb tcpip 5555` over the tailnet (same cmd on Wi-Fi/cellular/both, no toggling; reconnect via saved pairing). ⛔ hands-off **reboot re-arm blocked on ColorOS 15** (an app can't start the adb listener — root or manual). Hot-reload latency not yet captured. Throwaway spike — no daemon code. |
 | Live Run S5-01 (daemon data layer) | ✅ `RunStore` + `RunLog` + schema (`runs`, `run_events`) on branch `claude/live-run`; wired as singletons in `index.ts`. No `RunService`/routes yet. |
-| Live Run S5-02 (run-session spawn) | ✅ `src/run/runSession.ts`: pure `parseFlutterMachineLine` + `createRunSessionEngine` (line buffer, appId tracking, reload/restart/stop request↔response) + `makeSpawnRunSession` (retained child, stdin control, caffeinate). Typecheck clean, **204 tests** (+15, incl. a real-spawn stdin round-trip). Next: S5-03 `RunService`. |
+| Live Run S5-02 (run-session spawn) | ✅ `src/run/runSession.ts`: pure `parseFlutterMachineLine` + `createRunSessionEngine` (line buffer, appId tracking, reload/restart/stop request↔response) + `makeSpawnRunSession` (retained child, stdin control, caffeinate). Real-spawn stdin round-trip tested. |
+| Live Run S5-03 (RunService) | ✅ `src/run/runService.ts`: one `flutter run --machine` session per project; maps events → `RunLog`/`RunStore`; `start`/`reload`/`restart`/`stop`/`stopAll`; one-run-per-project gate (`RunBusyError`→409); `recoverInterrupted`. Wired in `index.ts` + `ServerDeps`. Typecheck clean, **217 tests** (+13). Next: S5-04 concurrency gate (run+task same-branch), then S5-05 routes/WS. |
 
 ---
 
@@ -80,6 +81,32 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-03 RunService (owns the flutter run session) — dev side
+Orchestrator tying S5-01 + S5-02 together, on branch `claude/live-run`. One live run per project.
+- **`src/run/runService.ts`:** `start()` resolves the active project, enforces the one-run-per-
+  project gate (`RunBusyError`→409), resolves the task branch and checks it out (or reads the
+  current branch via `runGit` for a no-task run), applies a flavor only when the project uses one
+  (guardrail-checked via `resolveBuildFlavor`), creates the `starting` row + `run.created`, then
+  spawns `flutter run --machine` (command built from `manifest.flutter` fvm/system + `-d <serial>`
+  + optional `--flavor`). Session events are mapped **event-log-first**: `started`→`markRunning`
+  +`run.started`, `debugPort`→`setDebugPort`+`run.debugPort`, `progress`/`log`/`appLog`→
+  `run.progress`/`run.log`, `stopped`→`markStopped`. `reload`/`restart` go reloading→running and
+  record ok/failed (a failed reload keeps the app running). `stop` = graceful `app.stop` then
+  force-kill after 5s. `onExit` marks stopped (code 0/null) or failed (non-zero). `recoverInterrupted`
+  fails runs left active by a restart (child is gone); `stopAll` for shutdown.
+- **Wiring:** instantiated in `index.ts` (logger child `mod:run`, `recoverInterrupted` on startup,
+  `stopAll` on shutdown); `ServerDeps.runService` replaces the raw `runs`/`runLog` pass-through.
+  Updated the 2 test call-sites (`stream.test.ts`, `build/downloadRoute.test.ts`).
+- **`RunStore.listActive()`** added (all non-terminal runs) for recovery.
+- **Tested:** typecheck clean, **217 tests** (+13): start (branch checkout + command + busy gate +
+  unknown project), event mapping (started/debugPort/log/progress), control (reload ok + failed,
+  non-active throws, stop ends+marks stopped, non-active stop false), exit (non-zero→failed),
+  recovery (fresh service fails the stranded run), + `listActive`. Fake `SpawnRunSession` so no
+  real flutter spawns.
+- **Not done:** S5-04 full gate (allow a task on the **same branch** as the run — today it's just
+  one-run-per-project, and the task gate is unchanged in AgentRunner), and S5-05 routes/WS. No real
+  `flutter run` exercised yet.
 
 ### 2026-10-15 — S5-02 run-session spawn layer (flutter run --machine) — dev side
 The one new mechanism vs BuildService (which discards the child and never writes stdin): a

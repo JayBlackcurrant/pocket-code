@@ -7,6 +7,7 @@ import { BuildStore } from './db/buildStore.js';
 import { BuildLog } from './db/buildLog.js';
 import { RunStore } from './db/runStore.js';
 import { RunLog } from './db/runLog.js';
+import { RunService } from './run/runService.js';
 import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
 import { BuildService, makeSpawnRunStep } from './build/buildService.js';
@@ -26,11 +27,12 @@ async function main(): Promise<void> {
   const events = new EventLog(db);
   const buildStore = new BuildStore(db);
   const buildLog = new BuildLog(db);
-  // Live-run session stores (S5-01). RunService (S5-03) will own the lifecycle; wired here so
-  // the data layer and WS replay share the one db, like builds.
+  // Live-run session stores + service (S5-01…03). RunService owns the flutter run session; the
+  // stores share the one db so WS replay works like builds.
   const runStore = new RunStore(db);
   const runLog = new RunLog(db);
   const git = new GitService();
+  const runService = new RunService({ registry, runs: runStore, runLog, tasks, git });
   const runner = new AgentRunner({
     registry,
     git,
@@ -72,22 +74,26 @@ async function main(): Promise<void> {
     distribution,
     releaseNotes,
     notifications,
-    runs: runStore,
-    runLog,
+    runService,
   });
   // Route runner + build logs through fastify's pino logger (same stream as HTTP logs).
   runner.setLogger(app.log.child({ mod: 'agent' }));
   builds.setLogger(app.log.child({ mod: 'build' }));
   distribution.setLogger(app.log.child({ mod: 'build' }));
   releaseNotes.setLogger(app.log.child({ mod: 'build' }));
+  runService.setLogger(app.log.child({ mod: 'run' }));
 
   // Crash recovery (S4-02): fail any task left non-terminal by a previous crash/restart; they
   // can be resumed from their stored session id.
   const recovered = runner.recoverInterrupted();
   if (recovered > 0) app.log.warn({ recovered }, 'marked interrupted tasks failed on startup');
+  // A run session can't survive a restart (the child process is gone); fail any left active.
+  const recoveredRuns = runService.recoverInterrupted();
+  if (recoveredRuns > 0) app.log.warn({ recoveredRuns }, 'marked interrupted runs failed on startup');
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
+    await runService.stopAll();
     await app.close();
     db.close();
     process.exit(0);

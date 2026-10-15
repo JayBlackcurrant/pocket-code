@@ -86,6 +86,16 @@ describe('RunStore queries', () => {
     expect(runs.listForProject('none')).toEqual([]);
   });
 
+  it('listActive returns non-terminal runs across all projects', () => {
+    runs.create({ id: 'a1', ...base, projectId: 'alpha' });
+    runs.create({ id: 'b1', ...base, projectId: 'beta' });
+    runs.create({ id: 'a2', ...base, projectId: 'alpha' });
+    runs.markStopped('a1');
+    expect(runs.listActive().map((r) => r.id).sort()).toEqual(['a2', 'b1']);
+    runs.markFailed('b1', 'x');
+    expect(runs.listActive().map((r) => r.id)).toEqual(['a2']);
+  });
+
   it('activeForProject finds a non-terminal run and ignores terminal ones', () => {
     expect(runs.activeForProject('hedged')).toBeUndefined();
 

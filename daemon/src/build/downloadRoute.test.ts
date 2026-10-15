@@ -21,6 +21,7 @@ import { ReleaseNotesService } from './releaseNotes.js';
 import { signDownloadToken } from './downloadToken.js';
 import { RunStore } from '../db/runStore.js';
 import { RunLog } from '../db/runLog.js';
+import { RunService } from '../run/runService.js';
 import { buildServer } from '../server.js';
 
 const DL_SECRET = 'download-route-test-secret-01';
@@ -88,8 +89,7 @@ beforeEach(async () => {
     distribution,
     releaseNotes,
     notifications,
-    runs: new RunStore(db),
-    runLog: new RunLog(db),
+    runService: new RunService({ registry, runs: new RunStore(db), runLog: new RunLog(db), tasks }),
   });
   await app.ready();
 });
