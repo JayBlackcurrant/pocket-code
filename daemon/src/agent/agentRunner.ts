@@ -19,6 +19,7 @@ import { PermissionBroker, type Decision, type PendingPermission } from './permi
 import { evaluatePermission } from './permissionRules.js';
 import { defaultSandbox } from './sandbox.js';
 import { safeResolveWithin } from '../fs/pathSafety.js';
+import { CheckoutGuard } from '../checkoutGuard.js';
 
 /** Thrown when a task is requested while the project's checkout is already busy with one. */
 export class ProjectBusyError extends Error {
@@ -80,6 +81,9 @@ export interface AgentRunnerDeps {
   approvalTimeoutMs?: number;
   /** Structured logger (e.g. fastify's `app.log`). Defaults to JSON-to-console. */
   logger?: RunnerLogger;
+  /** Shared checkout guard (coordinates tasks with live-run sessions, S5-04). index.ts passes the
+   *  SAME instance to AgentRunner and RunService; a standalone default is used in isolated tests. */
+  checkoutGuard?: CheckoutGuard;
 }
 
 export interface StartTaskInput {
@@ -141,8 +145,8 @@ export class AgentRunner {
   private readonly running = new Map<string, { query: Query; abort: AbortController }>();
   private readonly settled = new Map<string, Promise<void>>();
   private readonly broker: PermissionBroker;
-  /** Projects with a task currently owning the checkout (running or waiting). One at a time. */
-  private readonly activeProjects = new Set<string>();
+  /** Coordinates a task's hold on the checkout with any live-run session (S5-04). */
+  private readonly guard: CheckoutGuard;
 
   constructor(deps: AgentRunnerDeps) {
     this.registry = deps.registry;
@@ -162,6 +166,7 @@ export class AgentRunner {
     );
     this.sandbox = deps.sandbox === false ? undefined : (deps.sandbox ?? defaultSandbox());
     this.log = deps.logger ?? defaultLogger;
+    this.guard = deps.checkoutGuard ?? new CheckoutGuard();
   }
 
   /** Swap in a real logger after construction (index.ts passes fastify's app.log). */
@@ -231,13 +236,10 @@ export class AgentRunner {
     }
     const manifest = project.manifest;
 
-    // Single-owner gate: only one task may hold a project's checkout (running or waiting).
-    if (this.activeProjects.has(manifest.id)) {
-      throw new ProjectBusyError(
-        `project "${manifest.id}" already has an active task; finish or discard it first`,
-      );
-    }
-    this.activeProjects.add(manifest.id);
+    // Checkout gate (S5-04): one task per project, and a fresh start is refused while a live run
+    // holds the checkout (the new branch would differ from the run's). branch is unknown here.
+    const acq = this.guard.acquireTask(manifest.id);
+    if (!acq.ok) throw new ProjectBusyError(acq.reason);
 
     const taskId = input.taskId ?? genTaskId();
     // Create the task row first so events have a valid foreign key.
@@ -252,10 +254,11 @@ export class AgentRunner {
         name: input.title ?? input.prompt,
       });
     } catch (err) {
-      this.activeProjects.delete(manifest.id);
+      this.guard.releaseTask(manifest.id);
       this.fail(taskId, 'branch', err);
       throw err;
     }
+    this.guard.setTaskBranch(manifest.id, worktree.branch);
 
     this.tasks.setWorktree(taskId, worktree.branch, worktree.path);
     this.tasks.setStatus(taskId, 'running');
@@ -272,7 +275,7 @@ export class AgentRunner {
     const run = this.runAgent(taskId, worktree.path, input).finally(() => {
       this.running.delete(taskId);
       this.broker.clearTask(taskId);
-      this.activeProjects.delete(manifest.id);
+      this.guard.releaseTask(manifest.id);
     });
     this.settled.set(taskId, run);
     run.catch(() => {
@@ -298,18 +301,16 @@ export class AgentRunner {
     if (!project?.resolvedPath) throw new Error(`project not active: "${task.projectId}"`);
     const manifest = project.manifest;
 
-    if (this.activeProjects.has(manifest.id)) {
-      throw new ProjectBusyError(
-        `project "${manifest.id}" already has an active task; finish or discard it first`,
-      );
-    }
-    this.activeProjects.add(manifest.id);
+    // Checkout gate (S5-04): one task per project; a run on the SAME branch may coexist (so the
+    // run hot-reloads as Claude edits), but a run on another branch blocks the continue.
+    const acq = this.guard.acquireTask(manifest.id, task.branch);
+    if (!acq.ok) throw new ProjectBusyError(acq.reason);
 
     try {
       // Put the checkout on the task's branch (no-op if already there; fails on a dirty switch).
       await this.git.checkoutBranch(project.resolvedPath, task.branch);
     } catch (err) {
-      this.activeProjects.delete(manifest.id);
+      this.guard.releaseTask(manifest.id);
       this.fail(input.taskId, 'checkout', err);
       throw err;
     }
@@ -329,7 +330,7 @@ export class AgentRunner {
     ).finally(() => {
       this.running.delete(input.taskId);
       this.broker.clearTask(input.taskId);
-      this.activeProjects.delete(manifest.id);
+      this.guard.releaseTask(manifest.id);
     });
     this.settled.set(input.taskId, run);
     run.catch(() => {

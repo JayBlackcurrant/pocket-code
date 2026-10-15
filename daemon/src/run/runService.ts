@@ -6,6 +6,7 @@ import { RunStore, type RunRow } from '../db/runStore.js';
 import { RunLog, type StoredRunEvent } from '../db/runLog.js';
 import { GitError, GitService, runGit } from '../git/gitService.js';
 import { resolveBuildFlavor } from '../guardrails.js';
+import { CheckoutGuard } from '../checkoutGuard.js';
 import {
   makeSpawnRunSession,
   type RunControlResult,
@@ -50,6 +51,9 @@ export interface RunServiceDeps {
   /** Defaults to the real spawn-based session. Tests pass a fake. */
   spawnRunSession?: SpawnRunSession;
   logger?: RunLogger;
+  /** Shared checkout guard (coordinates with Claude tasks, S5-04). index.ts passes the SAME
+   *  instance to AgentRunner and RunService; a standalone default is used in isolated tests. */
+  checkoutGuard?: CheckoutGuard;
 }
 
 export interface StartRunInput {
@@ -87,6 +91,7 @@ export class RunService {
   private readonly tasks: TaskStore;
   private readonly git: GitService;
   private readonly spawnRunSession: SpawnRunSession;
+  private readonly guard: CheckoutGuard;
   private log: RunLogger;
 
   private readonly sessions = new Map<string, Session>();
@@ -100,6 +105,7 @@ export class RunService {
     this.tasks = deps.tasks;
     this.git = deps.git ?? new GitService();
     this.spawnRunSession = deps.spawnRunSession ?? makeSpawnRunSession();
+    this.guard = deps.checkoutGuard ?? new CheckoutGuard();
     this.log = deps.logger ?? noopLogger;
   }
 
@@ -162,14 +168,10 @@ export class RunService {
     const manifest = project.manifest;
     const cwd = project.resolvedPath;
 
-    // One live run per project (S5-04 extends this to allow a task on the same branch).
-    const active = this.runs.activeForProject(manifest.id);
-    if (active) {
-      throw new RunBusyError(`project "${manifest.id}" already has an active run ("${active.id}"); stop it first`);
-    }
-
-    // Resolve the branch to run and check it out.
+    // Resolve the branch to run — but do NOT touch the working tree yet; we gate first so a
+    // refused run never disturbs the checkout.
     let branch: string;
+    let taskBranchToCheckout: string | undefined;
     if (input.taskId !== undefined) {
       const task = this.tasks.get(input.taskId);
       if (!task) throw new RunError(`unknown task: "${input.taskId}"`);
@@ -178,56 +180,71 @@ export class RunService {
       }
       if (!task.branch) throw new RunError(`task "${input.taskId}" has no branch yet`);
       branch = task.branch;
-      try {
-        await this.git.checkoutBranch(cwd, branch);
-      } catch (err) {
-        const reason = err instanceof GitError ? err.message : String(err);
-        throw new RunError(`could not check out branch "${branch}": ${reason}`);
-      }
+      taskBranchToCheckout = task.branch;
     } else {
       branch = (await runGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     }
 
-    // Flavor only when the project uses flavors (guardrail-checked); plain run otherwise.
-    const flavor =
-      input.flavor !== undefined || manifest.flavorDefault !== undefined
-        ? resolveBuildFlavor(manifest, input.flavor)
-        : undefined;
+    // Checkout gate (S5-04): one run per project, and a task may coexist only on this same branch.
+    const acq = this.guard.acquireRun(manifest.id, branch);
+    if (!acq.ok) throw new RunBusyError(acq.reason);
 
-    const id = genRunId();
-    const row = this.runs.create({
-      id,
-      projectId: manifest.id,
-      taskId: input.taskId ?? null,
-      branch,
-      cwd,
-      deviceSerial: input.deviceSerial,
-      status: 'starting',
-    });
-    this.persist(id, 'run.created', {
-      projectId: manifest.id,
-      taskId: input.taskId ?? null,
-      branch,
-      deviceSerial: input.deviceSerial,
-      ...(flavor ? { flavor } : {}),
-    });
+    // Past the gate: any failure must release the run slot.
+    try {
+      // Put the checkout on the task's branch (no-op if already there; fails on a dirty switch).
+      if (taskBranchToCheckout) {
+        try {
+          await this.git.checkoutBranch(cwd, taskBranchToCheckout);
+        } catch (err) {
+          const reason = err instanceof GitError ? err.message : String(err);
+          throw new RunError(`could not check out branch "${taskBranchToCheckout}": ${reason}`);
+        }
+      }
 
-    const command = this.buildRunCommand(manifest, input.deviceSerial, flavor);
-    const abort = new AbortController();
-    const settled = new Promise<void>((res) => this.settlers.set(id, res));
-    this.settled.set(id, settled);
+      // Flavor only when the project uses flavors (guardrail-checked); plain run otherwise.
+      const flavor =
+        input.flavor !== undefined || manifest.flavorDefault !== undefined
+          ? resolveBuildFlavor(manifest, input.flavor)
+          : undefined;
 
-    const handle = this.spawnRunSession({
-      command,
-      cwd,
-      signal: abort.signal,
-      onEvent: (e) => this.onSessionEvent(id, e),
-    });
-    this.sessions.set(id, { handle, abort, projectId: manifest.id });
-    void handle.exited.then(({ code }) => this.onExit(id, code));
+      const id = genRunId();
+      const row = this.runs.create({
+        id,
+        projectId: manifest.id,
+        taskId: input.taskId ?? null,
+        branch,
+        cwd,
+        deviceSerial: input.deviceSerial,
+        status: 'starting',
+      });
+      this.persist(id, 'run.created', {
+        projectId: manifest.id,
+        taskId: input.taskId ?? null,
+        branch,
+        deviceSerial: input.deviceSerial,
+        ...(flavor ? { flavor } : {}),
+      });
 
-    this.log.info({ runId: id, projectId: manifest.id, branch }, 'run session starting');
-    return row;
+      const command = this.buildRunCommand(manifest, input.deviceSerial, flavor);
+      const abort = new AbortController();
+      const settled = new Promise<void>((res) => this.settlers.set(id, res));
+      this.settled.set(id, settled);
+
+      const handle = this.spawnRunSession({
+        command,
+        cwd,
+        signal: abort.signal,
+        onEvent: (e) => this.onSessionEvent(id, e),
+      });
+      this.sessions.set(id, { handle, abort, projectId: manifest.id });
+      void handle.exited.then(({ code }) => this.onExit(id, code));
+
+      this.log.info({ runId: id, projectId: manifest.id, branch }, 'run session starting');
+      return row;
+    } catch (err) {
+      this.guard.releaseRun(manifest.id);
+      throw err;
+    }
   }
 
   private onSessionEvent(runId: string, e: RunSessionEvent): void {
@@ -265,8 +282,10 @@ export class RunService {
   }
 
   private onExit(runId: string, code: number | null): void {
+    const session = this.sessions.get(runId);
     const row = this.runs.get(runId);
     this.sessions.delete(runId);
+    if (session) this.guard.releaseRun(session.projectId);
     if (row && row.status !== 'stopped' && row.status !== 'failed') {
       if (code === 0 || code === null) {
         this.runs.markStopped(runId);

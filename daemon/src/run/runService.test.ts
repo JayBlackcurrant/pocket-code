@@ -7,6 +7,7 @@ import { ProjectManifestSchema, type ProjectManifest } from '../config/projectMa
 import type { ProjectRegistry } from '../registry/projectRegistry.js';
 import type { GitService } from '../git/gitService.js';
 import { RunService, RunBusyError, RunError } from './runService.js';
+import { CheckoutGuard } from '../checkoutGuard.js';
 import type { RunControlResult, RunSessionEvent, RunSessionHandle, SpawnRunSession } from './runSession.js';
 
 const manifest: ProjectManifest = ProjectManifestSchema.parse({
@@ -176,6 +177,39 @@ describe('RunService control', () => {
 
   it('stop on a non-active run returns false', async () => {
     expect(await svc.stop('nope')).toBe(false);
+  });
+});
+
+describe('RunService + shared CheckoutGuard (S5-04)', () => {
+  const build = (guard: CheckoutGuard) =>
+    new RunService({ registry: fakeRegistry(), runs, runLog, tasks, git: fakeGit, spawnRunSession: fake.spawn, checkoutGuard: guard });
+
+  it('refuses a run when a task holds a different branch', async () => {
+    const guard = new CheckoutGuard();
+    const svc2 = build(guard);
+    guard.acquireTask('hedged', 'claude/other');
+    await expect(svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' })).rejects.toBeInstanceOf(
+      RunBusyError,
+    );
+  });
+
+  it('allows a run on the same branch a task holds', async () => {
+    const guard = new CheckoutGuard();
+    const svc2 = build(guard);
+    guard.acquireTask('hedged', 'claude/x'); // t1's branch
+    const row = await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    expect(row.status).toBe('starting');
+    expect(guard.hasRun('hedged')).toBe(true);
+  });
+
+  it('releases the run slot on exit so a later task can start', async () => {
+    const guard = new CheckoutGuard();
+    const svc2 = build(guard);
+    const row = await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    expect(guard.hasRun('hedged')).toBe(true);
+    fake.exit(0);
+    await svc2.whenSettled(row.id);
+    expect(guard.hasRun('hedged')).toBe(false);
   });
 });
 

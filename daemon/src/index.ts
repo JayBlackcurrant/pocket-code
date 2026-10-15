@@ -8,6 +8,7 @@ import { BuildLog } from './db/buildLog.js';
 import { RunStore } from './db/runStore.js';
 import { RunLog } from './db/runLog.js';
 import { RunService } from './run/runService.js';
+import { CheckoutGuard } from './checkoutGuard.js';
 import { GitService } from './git/gitService.js';
 import { AgentRunner } from './agent/agentRunner.js';
 import { BuildService, makeSpawnRunStep } from './build/buildService.js';
@@ -32,7 +33,9 @@ async function main(): Promise<void> {
   const runStore = new RunStore(db);
   const runLog = new RunLog(db);
   const git = new GitService();
-  const runService = new RunService({ registry, runs: runStore, runLog, tasks, git });
+  // One shared guard so a Claude task and a live-run session coordinate the single checkout (S5-04).
+  const checkoutGuard = new CheckoutGuard();
+  const runService = new RunService({ registry, runs: runStore, runLog, tasks, git, checkoutGuard });
   const runner = new AgentRunner({
     registry,
     git,
@@ -40,6 +43,7 @@ async function main(): Promise<void> {
     events,
     db,
     approvalTimeoutMs: env.approvalTimeoutMs,
+    checkoutGuard,
     ...(env.sandboxEnabled ? {} : { sandbox: false as const }),
   });
   // Long jobs run under `caffeinate -i` so the Mac stays awake mid-build (S3-08).

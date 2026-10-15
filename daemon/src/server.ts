@@ -557,6 +557,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (!task) return reply.code(404).send({ error: 'unknown task' });
     const project = deps.registry.getActive(task.projectId);
     if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+    // A discard runs `git reset --hard` + `clean -fd`, which would wreck a live run on this branch
+    // (killing its build outputs mid-session). Refuse while one is active (S5-04).
+    const liveRun = deps.runService.activeForProject(task.projectId);
+    if (liveRun && liveRun.branch === task.branch) {
+      return reply
+        .code(409)
+        .send({ error: `a live run ("${liveRun.id}") is active on this branch; stop it before discarding` });
+    }
     await deps.runner.cancel(task.id);
     try {
       await deps.git.discardTaskBranch(project.resolvedPath, task.branch, project.manifest.git.base);

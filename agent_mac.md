@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-03 `RunService`** landed (owns one `flutter run --machine` session per project; maps session events → `RunLog`/`RunStore`; reload/restart/stop; crash recovery; wired into `index.ts` + `ServerDeps`; typecheck clean, **217 tests**). Earlier today: S5-02 run-session spawn layer (`runSession.ts`); S5-01 data layer (`RunStore`/`RunLog`). Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-15 — **S5-04 concurrency gate** landed (`CheckoutGuard`: a task + a live run may share a project's checkout only on the **same branch**; one task + one run per project; discard refused while a run is live on the branch; shared instance wired into AgentRunner + RunService via `index.ts`; typecheck clean, **228 tests**). Earlier today: S5-03 `RunService`; S5-02 run-session spawn; S5-01 data layer. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -33,7 +33,8 @@
 | Live Run S5-00 (connectivity spike) | ✅ **cellular proven** via fixed-port `adb tcpip 5555` over the tailnet (same cmd on Wi-Fi/cellular/both, no toggling; reconnect via saved pairing). ⛔ hands-off **reboot re-arm blocked on ColorOS 15** (an app can't start the adb listener — root or manual). Hot-reload latency not yet captured. Throwaway spike — no daemon code. |
 | Live Run S5-01 (daemon data layer) | ✅ `RunStore` + `RunLog` + schema (`runs`, `run_events`) on branch `claude/live-run`; wired as singletons in `index.ts`. No `RunService`/routes yet. |
 | Live Run S5-02 (run-session spawn) | ✅ `src/run/runSession.ts`: pure `parseFlutterMachineLine` + `createRunSessionEngine` (line buffer, appId tracking, reload/restart/stop request↔response) + `makeSpawnRunSession` (retained child, stdin control, caffeinate). Real-spawn stdin round-trip tested. |
-| Live Run S5-03 (RunService) | ✅ `src/run/runService.ts`: one `flutter run --machine` session per project; maps events → `RunLog`/`RunStore`; `start`/`reload`/`restart`/`stop`/`stopAll`; one-run-per-project gate (`RunBusyError`→409); `recoverInterrupted`. Wired in `index.ts` + `ServerDeps`. Typecheck clean, **217 tests** (+13). Next: S5-04 concurrency gate (run+task same-branch), then S5-05 routes/WS. |
+| Live Run S5-03 (RunService) | ✅ `src/run/runService.ts`: one `flutter run --machine` session per project; maps events → `RunLog`/`RunStore`; `start`/`reload`/`restart`/`stop`/`stopAll`; `recoverInterrupted`. Wired in `index.ts` + `ServerDeps`. |
+| Live Run S5-04 (concurrency gate) | ✅ `src/checkoutGuard.ts` (`CheckoutGuard`): a task + a run coexist only on the **same branch**; one task + one run per project; fresh task start refused while a run is live; shared instance wired into AgentRunner (replaces `activeProjects`) + RunService via `index.ts`. Discard refused (409) while a run is live on the task's branch. Typecheck clean, **228 tests** (+11). Next: S5-05 routes/WS. |
 
 ---
 
@@ -81,6 +82,36 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-15 — S5-04 concurrency gate: run + task share a checkout (same branch) — dev side
+The doc's open "concurrency" question (`LIVE_RUN_PLAN.md` §4.3). Tasks run in place in the one
+project checkout and a live run holds that same checkout, so they may coexist **only on the same
+branch** (Claude edits the branch, the run hot-reloads from disk). Branch `claude/live-run`.
+- **`src/checkoutGuard.ts` (`CheckoutGuard`):** one shared in-memory arbiter. Per project it tracks
+  the active task's branch and run's branch. `acquireTask(projectId, branch?)` — refuses a 2nd task,
+  and (fresh start with unknown branch, or a different branch) refuses while a run is live;
+  `setTaskBranch` records a fresh start's branch once created. `acquireRun(projectId, branch)` —
+  refuses a 2nd run, and a run whose branch differs from an active task's. `releaseTask`/`releaseRun`,
+  `hasRun`/`runBranch` introspection. Returns `{ok}|{ok:false,reason}` so callers throw their own
+  409 error type.
+- **AgentRunner:** `activeProjects` Set replaced by the shared guard. `start()` acquires with no
+  branch (fresh) → refused while a run is live; records the branch via `setTaskBranch` after
+  `createTaskBranch`. `continueTask()` acquires with the task's branch → a run on that **same**
+  branch coexists, a different branch is refused. Releases in the run loop's `finally` / on failure.
+- **RunService:** resolves the branch first **without touching the tree**, gates via `acquireRun`,
+  then checks out (releasing the slot on any failure); releases on session exit. Old DB-based
+  one-run gate dropped in favour of the guard.
+- **index.ts:** one `CheckoutGuard` instance passed to BOTH services (the whole point — they must
+  share). Isolated tests default to their own guard.
+- **Discard gate (`server.ts`):** `POST /tasks/:id/discard` refuses (409) when a live run is active
+  on that task's branch — otherwise `git reset --hard`/`clean -fd` would wreck the running session.
+- **Tested:** typecheck clean, **228 tests** (+11): `checkoutGuard.test.ts` (one-each, run-blocks-
+  fresh-task, run-allows-same-branch-task, task-blocks-diff-branch-run / allows-same, mid-start null
+  branch, release, project isolation); RunService+shared-guard (diff branch→RunBusyError, same
+  branch allowed, releases on exit); AgentRunner refuses a fresh start while a run is live.
+- **Not done:** S5-05 routes/WS (`/projects/:id/runs`, `/runs/:id/{reload,restart,stop}`,
+  `GET /runs/:id`, WS `/runs/:id/stream`) + `RunBusyError`→409 mapping at those routes + S5-06
+  device discovery. No real `flutter run` exercised yet.
 
 ### 2026-10-15 — S5-03 RunService (owns the flutter run session) — dev side
 Orchestrator tying S5-01 + S5-02 together, on branch `claude/live-run`. One live run per project.

@@ -10,6 +10,7 @@ import { openDb, type Db } from '../db/db.js';
 import { EventLog } from '../db/eventLog.js';
 import { TaskStore } from '../db/taskStore.js';
 import { AgentRunner, ProjectBusyError, type QueryFn } from './agentRunner.js';
+import { CheckoutGuard } from '../checkoutGuard.js';
 
 let repo: string;
 let registry: ProjectRegistry;
@@ -161,6 +162,21 @@ describe('AgentRunner', () => {
     const seqs = log.map((e) => e.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
     expect(new Set(seqs).size).toBe(seqs.length);
+  });
+
+  it('refuses a fresh task start while a live run holds the checkout (S5-04)', async () => {
+    const guard = new CheckoutGuard();
+    guard.acquireRun('hedged', 'claude/live'); // a run session is active on another branch
+    const runner = new AgentRunner({
+      registry,
+      git: new GitService(),
+      tasks,
+      events,
+      db,
+      query: fakeQuery([sysInit, resultOk]),
+      checkoutGuard: guard,
+    });
+    await expect(runner.start({ projectId: 'hedged', prompt: 'x' })).rejects.toBeInstanceOf(ProjectBusyError);
   });
 
   it('continues a task by resuming its session on the same branch (#2)', async () => {
