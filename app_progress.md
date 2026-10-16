@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no device tokens or
 > pairing codes. The app stores its token in `flutter_secure_storage` only.
 
-**Last updated:** 2026-10-16 — **S5-15 run base branch + switch-to-app** — `RunPage` now opens for a task (editable Code tab) **or** a project's base branch (no task); project screen gained a **Run base branch** action; "switch to app" now backgrounds PocketCode via a native `MethodChannel` (`moveTaskToBack`) so the running app comes forward (Android can't force split-screen). analyze clean, **55 tests**, debug APK builds (native Kotlin compiles). Earlier today: S5-14 console; S5-12 editor. ⚠️ Feature 1 still not run end-to-end on a real phone.
+**Last updated:** 2026-10-16 — ✅ **Feature 1 VERIFIED END-TO-END on the real phone** (user-confirmed all flows working over the tailnet). App side complete: S5-08…11 run screen, S5-12 manual editor, S5-14 debug console, S5-15 base run + switch-to-app. analyze clean, **55 tests**, debug APK builds. Only S5-16 (base+task concurrency) parked.
 
 ---
 

@@ -8,7 +8,7 @@
 > Related: [`PROJECT_DESCRIPTION.md`](PROJECT_DESCRIPTION.md), [`SPRINT_PLAN.md`](SPRINT_PLAN.md),
 > [`agent_mac.md`](agent_mac.md), [`app_progress.md`](app_progress.md).
 
-**Last updated:** 2026-10-15 · **Status:** **Feature 1 code-complete** — daemon S5-01…07 (247 tests) + app S5-08…11 (54 tests) on branch `claude/live-run`. S5-00 proved cellular connectivity via fixed-port `adb tcpip 5555`; hands-off reboot re-arm is blocked on ColorOS 15 (manual re-arm, §3.2). **Not yet run end-to-end on a real phone** — the top parked item (§11). Enhancement ideas (embed/split-screen, run base, debug console) in §10; Phase 2 in §8.
+**Last updated:** 2026-10-16 · **Status:** **Feature 1 DONE and verified end-to-end on the real phone** (user-confirmed: discover → run → hot reload/restart/stop → auto-reload after a Claude edit → manual edit → debug console → base run → switch-to-app → concurrency gate → re-arm all working over the tailnet). Daemon S5-01…07 + S5-12 + S5-14; app S5-08…11 + S5-12 + S5-14 + S5-15. Only S5-16 (base+task concurrency) parked (§10.2). Phase 2 extras (§8) done except S5-16/S5-13.
 
 ---
 
@@ -373,9 +373,8 @@ item.** → **S5-14**.
 
 ## 11. On hold / parked (Feature 1 scope)
 
-- **Real end-to-end on the armed phone** — nothing has driven real `adb`/`flutter run` yet; the
-  whole chain is fake/unit-tested. **Highest-value next step before relying on Feature 1.**
-- **S5-00 hot-reload latency number** — still uncaptured (`scripts/adb-connect.sh run <host>`).
+- ✅ **Real end-to-end on the armed phone** — DONE 2026-10-16, user-confirmed all flows working.
+- **S5-16** base + task concurrent runs (parked — needs 2 checkouts + 2 devices/appIds, §10.2).
 - **S5-13** custom boot-helper app (only if the off-the-shelf arming proves unreliable on ColorOS).
 - **S5-16** — base + task concurrent runs (the §10.2 enhancement; parked — needs 2 checkouts + 2
   devices/appIds).
