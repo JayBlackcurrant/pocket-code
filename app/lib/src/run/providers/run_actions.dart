@@ -85,8 +85,9 @@ class RunActions extends _$RunActions {
     return (data['reloadTriggered'] ?? false) as bool;
   }
 
-  /// The most recent still-active run for a task, if any (GET /projects/:id/runs, newest first).
-  Future<RunRow?> activeForTask(String projectId, String taskId) async {
+  /// The most recent still-active run for a task (or the base run when `taskId` is null), if any
+  /// (GET /projects/:id/runs, newest first).
+  Future<RunRow?> activeRun(String projectId, {String? taskId}) async {
     final dio = ref.read(apiProvider);
     final res = await dio.get<dynamic>('/projects/$projectId/runs').guard();
     final runs = (res.data['runs'] as List).cast<Map<String, dynamic>>();

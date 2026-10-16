@@ -46,7 +46,7 @@ final class RunActionsProvider extends $NotifierProvider<RunActions, void> {
   }
 }
 
-String _$runActionsHash() => r'05131d38fe499d9ea5e3fb49a6b9cea4917b0eba';
+String _$runActionsHash() => r'c33e9ff563e14ff4deacf3518630fc9aaf729842';
 
 /// Live-run actions (S5-05/06): device discovery, start, hot reload/restart, stop. Stateless —
 /// each method hits one daemon endpoint.

@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no device tokens or
 > pairing codes. The app stores its token in `flutter_secure_storage` only.
 
-**Last updated:** 2026-10-16 — **S5-14 debug console** rendering — `run.console` events (from the daemon's VM-Service client: `dart:developer` logs + Flutter errors, with level tags) render in the run log (new `RunLineKind.console`, errors as errors). analyze clean, **55 tests**, build bundle OK. Earlier today: S5-12 manual code editor. Earlier (2026-10-15): S5-10/09/08 run screen + data layer. ⚠️ Feature 1 still not run end-to-end on a real phone.
+**Last updated:** 2026-10-16 — **S5-15 run base branch + switch-to-app** — `RunPage` now opens for a task (editable Code tab) **or** a project's base branch (no task); project screen gained a **Run base branch** action; "switch to app" now backgrounds PocketCode via a native `MethodChannel` (`moveTaskToBack`) so the running app comes forward (Android can't force split-screen). analyze clean, **55 tests**, debug APK builds (native Kotlin compiles). Earlier today: S5-14 console; S5-12 editor. ⚠️ Feature 1 still not run end-to-end on a real phone.
 
 ---
 
@@ -81,6 +81,22 @@
 ---
 
 ## Log
+
+### 2026-10-16 — S5-15 run base branch (no task) + switch-to-app
+Two asks from the 2026-10-16 review. Branch `claude/live-run`.
+- **Run the base branch without a task:** `RunPage` now takes `{taskId?, projectId?}` — a task run
+  (editable Code tab) or a **base run** (projectId only, Logs-only, no Code tab). `RunService.start`
+  with no taskId already runs the current checkout, so this is UI-only. `RunActions.activeForTask`
+  → `activeRun(projectId, {taskId})` (null matches base runs, for resume). Route changed to `/run`
+  (taskId/projectId passed in-memory). **Project screen** gained a **Run base branch** app-bar
+  action; the task-page **Run on phone** entry is unchanged.
+- **Switch to app:** Android has **no public API to force split-screen** (user-initiates it via
+  recents), so "switch to app" now **backgrounds PocketCode** (`moveTaskToBack`) via a native
+  `MethodChannel('pocketcode/app')` in `MainActivity.kt` — the running app (a separate app on the
+  phone) comes forward; swipe back via recents. `app_switcher.dart` wraps it (no-op off-Android).
+- **Base + a task at once** (S5-16) is still not possible (one checkout + same appId) — unchanged.
+- **Tested:** `flutter analyze` clean, `flutter test` **55/55**, **`flutter build apk --debug` OK**
+  (compiles the Kotlin `MethodChannel`). Routes regenerated.
 
 ### 2026-10-16 — S5-14 debug-console rendering (`run.console`)
 Shows the structured debug console the daemon now streams from the Dart VM Service (see

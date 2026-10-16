@@ -440,10 +440,14 @@ class ReviewRouteArgs {
 /// generated route for
 /// [RunPage]
 class RunRoute extends PageRouteInfo<RunRouteArgs> {
-  RunRoute({required String taskId, Key? key, List<PageRouteInfo>? children})
-      : super(
+  RunRoute({
+    String? taskId,
+    String? projectId,
+    Key? key,
+    List<PageRouteInfo>? children,
+  }) : super(
           RunRoute.name,
-          args: RunRouteArgs(taskId: taskId, key: key),
+          args: RunRouteArgs(taskId: taskId, projectId: projectId, key: key),
           initialChildren: children,
         );
 
@@ -452,33 +456,43 @@ class RunRoute extends PageRouteInfo<RunRouteArgs> {
   static PageInfo page = PageInfo(
     name,
     builder: (data) {
-      final args = data.argsAs<RunRouteArgs>();
-      return RunPage(taskId: args.taskId, key: args.key);
+      final args = data.argsAs<RunRouteArgs>(
+        orElse: () => const RunRouteArgs(),
+      );
+      return RunPage(
+        taskId: args.taskId,
+        projectId: args.projectId,
+        key: args.key,
+      );
     },
   );
 }
 
 class RunRouteArgs {
-  const RunRouteArgs({required this.taskId, this.key});
+  const RunRouteArgs({this.taskId, this.projectId, this.key});
 
-  final String taskId;
+  final String? taskId;
+
+  final String? projectId;
 
   final Key? key;
 
   @override
   String toString() {
-    return 'RunRouteArgs{taskId: $taskId, key: $key}';
+    return 'RunRouteArgs{taskId: $taskId, projectId: $projectId, key: $key}';
   }
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
     if (other is! RunRouteArgs) return false;
-    return taskId == other.taskId && key == other.key;
+    return taskId == other.taskId &&
+        projectId == other.projectId &&
+        key == other.key;
   }
 
   @override
-  int get hashCode => taskId.hashCode ^ key.hashCode;
+  int get hashCode => taskId.hashCode ^ projectId.hashCode ^ key.hashCode;
 }
 
 /// generated route for

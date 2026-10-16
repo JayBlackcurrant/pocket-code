@@ -6,8 +6,8 @@ import '../../../core/extension/context.dart';
 import '../../review/models/diff_file.dart';
 import '../../review/providers/diff_providers.dart';
 import '../../routes/app_router.dart';
-import '../../tasks/models/task_detail.dart';
 import '../../tasks/providers/task_provider.dart';
+import '../app_switcher.dart';
 import '../models/device.dart';
 import '../models/run_stream_state.dart';
 import '../providers/run_actions.dart';
@@ -15,15 +15,20 @@ import '../providers/run_stream.dart';
 import '../run_feed.dart';
 import '../tailnet.dart';
 
-/// Live run screen (S5-09): discover the phone over the tailnet (adb connect cascade), start
-/// `flutter run` on it, then watch the live log and drive Hot reload / Hot restart / Stop — the
-/// Flutter IDE toolbar, on your real phone. The app itself shows on the phone (switch to it);
-/// PocketCode holds the controls.
+/// Live run screen (S5-09/15): discover the phone over the tailnet, start `flutter run` on it, then
+/// watch the live log + debug console and drive Hot reload / Hot restart / Stop. Opens either for a
+/// task (editable Code tab) or for a project's **base branch** (no task). The app shows on the phone
+/// — "switch to app" backgrounds PocketCode so it comes forward.
 @RoutePage()
 class RunPage extends ConsumerStatefulWidget {
-  const RunPage({required this.taskId, super.key});
+  const RunPage({this.taskId, this.projectId, super.key})
+      : assert(taskId != null || projectId != null, 'need a taskId or a projectId');
 
-  final String taskId;
+  /// Run a task's branch (editable Code tab). Null for a base-branch run.
+  final String? taskId;
+
+  /// Project to run the base branch of, when there's no task.
+  final String? projectId;
 
   @override
   ConsumerState<RunPage> createState() => _RunPageState();
@@ -40,6 +45,8 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
   final TextEditingController _hostCtrl = TextEditingController();
   final ScrollController _scroll = ScrollController();
   late final TabController _tabs = TabController(length: 2, vsync: this);
+
+  bool get _hasTask => widget.taskId != null;
 
   @override
   void dispose() {
@@ -60,22 +67,22 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
     });
   }
 
-  // Adopt a run already active for this task when the screen opens.
-  void _maybeResume(TaskDetail task) {
+  // Adopt a run already active for this task (or base run) when the screen opens.
+  void _maybeResume(String projectId) {
     if (_resumeChecked) return;
     _resumeChecked = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         final r = await ref
             .read(runActionsProvider.notifier)
-            .activeForTask(task.projectId, widget.taskId);
+            .activeRun(projectId, taskId: widget.taskId);
         if (mounted && r != null && _runId == null) {
           setState(() => _runId = r.id);
         } else {
-          _discover(task.projectId);
+          _discover(projectId);
         }
       } catch (_) {
-        _discover(task.projectId);
+        _discover(projectId);
       }
     });
   }
@@ -96,8 +103,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         return;
       }
       _host = h;
-      final d =
-          await ref.read(runActionsProvider.notifier).devices(projectId, h);
+      final d = await ref.read(runActionsProvider.notifier).devices(projectId, h);
       if (mounted) setState(() => _discovery = d);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -106,13 +112,13 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
     }
   }
 
-  Future<void> _start(TaskDetail task) async {
+  Future<void> _start(String projectId) async {
     final serial = _discovery?.primary?.serial;
     if (serial == null) return;
     setState(() => _busy = true);
     try {
       final r = await ref.read(runActionsProvider.notifier).start(
-            task.projectId,
+            projectId,
             deviceSerial: serial,
             taskId: widget.taskId,
           );
@@ -129,8 +135,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
     if (id == null) return;
     try {
       final actions = ref.read(runActionsProvider.notifier);
-      final res =
-          kind == 'reload' ? await actions.reload(id) : await actions.restart(id);
+      final res = kind == 'reload' ? await actions.reload(id) : await actions.restart(id);
       _snack(res.ok ? (res.message ?? 'Done') : 'Failed: ${res.message ?? ''}');
     } catch (e) {
       _snack('$e');
@@ -150,32 +155,36 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final taskAsync = ref.watch(taskDetailProvider(widget.taskId));
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Run on phone'),
+        title: Text(_hasTask ? 'Run on phone' : 'Run base on phone'),
         actions: [
           if (_runId != null)
             IconButton(
               tooltip: 'Switch to the app',
               icon: const Icon(Icons.phone_android),
-              onPressed: () => _snack(
-                  'Your app is running on this phone — use the app switcher to view it.'),
+              onPressed: () async {
+                _snack('Switching to your app…');
+                await moveAppToBack();
+              },
             ),
         ],
       ),
-      body: taskAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => _centerText('$e'),
-        data: (task) => _body(context, task),
-      ),
+      body: _hasTask
+          ? ref.watch(taskDetailProvider(widget.taskId!)).when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => _centered('$e'),
+                data: (task) => _content(context, task.projectId,
+                    task.branch.isEmpty ? '—' : task.branch),
+              )
+          : _content(context, widget.projectId!, 'base branch'),
     );
   }
 
-  Widget _body(BuildContext context, TaskDetail task) {
+  Widget _content(BuildContext context, String projectId, String branchLabel) {
     if (_runId == null) {
-      _maybeResume(task);
-      return _setupView(context, task);
+      _maybeResume(projectId);
+      return _setupView(context, projectId, branchLabel);
     }
     final provider = runStreamProvider(_runId!);
     ref.listen(provider.select((s) => s.lines.length), (_, __) => _scrollToEnd());
@@ -184,41 +193,36 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
       children: [
         _header(context, state),
         if (state.error != null) _banner(context, state.error!, context.colors.red),
-        TabBar(
-          controller: _tabs,
-          tabs: const [Tab(text: 'Logs'), Tab(text: 'Code')],
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabs,
-            children: [
-              _logView(context, state),
-              _codeView(context),
-            ],
+        if (_hasTask) ...[
+          TabBar(controller: _tabs, tabs: const [Tab(text: 'Logs'), Tab(text: 'Code')]),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [_logView(context, state), _codeView(context)],
+            ),
           ),
-        ),
+        ] else
+          Expanded(child: _logView(context, state)),
         _controlBar(context, state),
       ],
     );
   }
 
-  // Read-only view of the task's changed files (manual editing is Phase 2, S5-12). Swipe here
-  // from Logs; tap a file to open the existing diff/code viewer.
+  // Read-only view of the task's changed files (manual editing is S5-12). Only for task runs.
   Widget _codeView(BuildContext context) {
-    final filesAsync = ref.watch(diffSummaryProvider(widget.taskId));
+    final filesAsync = ref.watch(diffSummaryProvider(widget.taskId!));
     return filesAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => _centerText('$e'),
+      error: (e, _) => _centered('$e'),
       data: (files) {
         if (files.isEmpty) {
           return Center(
             child: Text('No changed files',
-                style:
-                    context.text.regular14.copyWith(color: context.colors.muted)),
+                style: context.text.regular14.copyWith(color: context.colors.muted)),
           );
         }
         return RefreshIndicator(
-          onRefresh: () async => ref.invalidate(diffSummaryProvider(widget.taskId)),
+          onRefresh: () async => ref.invalidate(diffSummaryProvider(widget.taskId!)),
           child: ListView.builder(
             itemCount: files.length,
             itemBuilder: (_, i) => _fileTile(context, files[i]),
@@ -239,34 +243,31 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('+${file.additions}',
-                    style: context.text.regular12
-                        .copyWith(color: context.colors.green)),
+                    style: context.text.regular12.copyWith(color: context.colors.green)),
                 const SizedBox(width: 8),
                 Text('-${file.deletions}',
-                    style:
-                        context.text.regular12.copyWith(color: context.colors.red)),
+                    style: context.text.regular12.copyWith(color: context.colors.red)),
               ],
             ),
       // Tap to edit (S5-12): during a run the branch is checked out, so edits save + hot-reload.
       onTap: () =>
-          context.router.push(CodeEditorRoute(taskId: widget.taskId, path: file.path)),
+          context.router.push(CodeEditorRoute(taskId: widget.taskId!, path: file.path)),
     );
   }
 
   // --- setup (discover + start) ---------------------------------------------
 
-  Widget _setupView(BuildContext context, TaskDetail task) {
+  Widget _setupView(BuildContext context, String projectId, String branchLabel) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Run this task live', style: context.text.semibold16),
+          Text(_hasTask ? 'Run this task live' : 'Run the base branch live',
+              style: context.text.semibold16),
           const SizedBox(height: 4),
-          Text(
-            'Branch ${task.branch.isEmpty ? '—' : task.branch}',
-            style: context.text.regular12.copyWith(color: context.colors.muted),
-          ),
+          Text('Branch $branchLabel',
+              style: context.text.regular12.copyWith(color: context.colors.muted)),
           const SizedBox(height: 16),
           if (_discovering)
             const Padding(
@@ -275,16 +276,15 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
             )
           else ...[
             if (_discovery != null && _discovery!.reArmNeeded)
-              _reArmCard(context, task)
+              _reArmCard(context, projectId)
             else if (_discovery != null && _discovery!.connected)
-              _deviceCard(context, task)
+              _deviceCard(context, projectId)
             else
-              _hostEntry(context, task),
+              _hostEntry(context, projectId),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!,
-                  style:
-                      context.text.regular12.copyWith(color: context.colors.red)),
+                  style: context.text.regular12.copyWith(color: context.colors.red)),
             ],
           ],
         ],
@@ -292,7 +292,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
     );
   }
 
-  Widget _deviceCard(BuildContext context, TaskDetail task) {
+  Widget _deviceCard(BuildContext context, String projectId) {
     final d = _discovery!;
     final dev = d.primary!;
     return Column(
@@ -301,9 +301,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         Row(children: [
           Icon(Icons.phone_android, size: 18, color: context.colors.green),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(dev.name ?? dev.serial, style: context.text.medium14),
-          ),
+          Expanded(child: Text(dev.name ?? dev.serial, style: context.text.medium14)),
           _qualityChip(context, d.quality),
         ]),
         const SizedBox(height: 4),
@@ -312,27 +310,23 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         if (!dev.flutterVisible) ...[
           const SizedBox(height: 8),
           Text('Connected via adb, but Flutter doesn\'t list it yet — Run may still work.',
-              style:
-                  context.text.regular12.copyWith(color: context.colors.muted)),
+              style: context.text.regular12.copyWith(color: context.colors.muted)),
         ],
         const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: _busy ? null : () => _start(task),
+            onPressed: _busy ? null : () => _start(projectId),
             icon: _busy
                 ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.play_arrow),
             label: const Text('Run'),
           ),
         ),
         const SizedBox(height: 8),
         TextButton.icon(
-          onPressed:
-              _discovering ? null : () => _discover(task.projectId, host: _host),
+          onPressed: _discovering ? null : () => _discover(projectId, host: _host),
           icon: const Icon(Icons.refresh, size: 16),
           label: const Text('Re-check device'),
         ),
@@ -340,7 +334,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
     );
   }
 
-  Widget _reArmCard(BuildContext context, TaskDetail task) {
+  Widget _reArmCard(BuildContext context, String projectId) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -361,8 +355,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed:
-                _discovering ? null : () => _discover(task.projectId, host: _host),
+            onPressed: _discovering ? null : () => _discover(projectId, host: _host),
             icon: const Icon(Icons.refresh),
             label: const Text('Re-check'),
           ),
@@ -371,7 +364,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
     );
   }
 
-  Widget _hostEntry(BuildContext context, TaskDetail task) {
+  Widget _hostEntry(BuildContext context, String projectId) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -396,7 +389,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
                 : () {
                     final h = _hostCtrl.text.trim();
                     if (h.isEmpty) return;
-                    _discover(task.projectId, host: h);
+                    _discover(projectId, host: h);
                   },
             icon: const Icon(Icons.search),
             label: const Text('Find device'),
@@ -432,8 +425,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
           const Spacer(),
           if (!state.connected)
             Text('reconnecting…',
-                style: context.text.regular12
-                    .copyWith(color: context.colors.muted)),
+                style: context.text.regular12.copyWith(color: context.colors.muted)),
         ],
       ),
     );
@@ -452,8 +444,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(10),
       ),
-      child:
-          Text(label, style: context.text.regular12.copyWith(color: color)),
+      child: Text(label, style: context.text.regular12.copyWith(color: color)),
     );
   }
 
@@ -479,15 +470,12 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
       case RunLineKind.reload:
         return _note(context, line.text, context.colors.accent, Icons.sync);
       case RunLineKind.success:
-        return _note(
-            context, line.text, context.colors.green, Icons.check_circle_outline);
+        return _note(context, line.text, context.colors.green, Icons.check_circle_outline);
       case RunLineKind.error:
         return _note(context, line.text, context.colors.red, Icons.error_outline);
       case RunLineKind.lifecycle:
-        return _note(
-            context, line.text, context.colors.muted, Icons.info_outline);
+        return _note(context, line.text, context.colors.muted, Icons.info_outline);
       case RunLineKind.console:
-        // Structured VM-service console entry (dart:developer logs) — monospace, tinted.
         return Text(
           line.text,
           style: context.text.regular12.copyWith(
@@ -510,9 +498,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 8),
-          Expanded(
-              child: Text(text,
-                  style: context.text.regular14.copyWith(color: color))),
+          Expanded(child: Text(text, style: context.text.regular14.copyWith(color: color))),
         ],
       ),
     );
@@ -590,7 +576,7 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
         child: Text(text, style: context.text.regular12.copyWith(color: color)),
       );
 
-  Widget _centerText(String text) => Center(
+  Widget _centered(String text) => Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(text, style: context.text.regular14),

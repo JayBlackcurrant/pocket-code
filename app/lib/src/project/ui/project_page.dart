@@ -135,7 +135,16 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
     });
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.projectName)),
+      appBar: AppBar(
+        title: Text(widget.projectName),
+        actions: [
+          IconButton(
+            tooltip: 'Run base branch on phone',
+            icon: const Icon(Icons.play_circle_outline),
+            onPressed: () => context.router.push(RunRoute(projectId: widget.projectId)),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           _tabHeader(context),

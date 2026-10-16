@@ -311,8 +311,9 @@ armed phone (no real `adb`/`flutter run` exercised yet — everything is fake/un
       short.
 - [x] **S5-14** **Debug console** via the Dart VM Service (see §10.3). _(Daemon `vmService.ts` →
       `run.console` events, 266 tests; app renders them in the Logs tab.)_
-- [ ] **S5-15** **Run the base branch** without a task (project-level Run entry) + make "switch to
-      app" open Android **split-screen** (see §10.1/§10.2).
+- [x] **S5-15** **Run the base branch** without a task (project-level Run entry) ✅ + "switch to
+      app" ✅ (backgrounds PocketCode via a native `moveTaskToBack` channel — Android can't force
+      split-screen, §10.1). _App only; `RunService` already runs the base when started with no task._
 - [ ] **S5-16** **Base + task concurrent runs** — needs two working trees + two devices/appIds; large,
       reverses the single-checkout model (see §10.2). Park unless clearly needed.
 
@@ -337,8 +338,10 @@ Three questions raised after Feature 1 went code-complete. Captured here with th
 Android does **not** allow embedding another app's screen inside yours (reserved for launchers /
 accessibility / screen-capture), and the run target is a separate app/process. So true embedding
 isn't possible while the app runs on the phone itself. Ways to see it *alongside*:
-- **Split-screen (recommended):** Android's built-in split view. Free; make the "switch to app"
-  button open it via a small platform channel. → **S5-15**.
+- **Split-screen:** Android's built-in split view — but an app **cannot force** split-screen (it's
+  user-initiated via recents), so there's no button for it. Instead **S5-15 backgrounds PocketCode**
+  (`moveTaskToBack` via a native channel) so the running app comes forward; the user can pin them
+  side-by-side via recents. ✅ done.
 - **Picture-in-Picture:** the app under test floats over PocketCode — but only if *that* app opts
   into PiP, so not general.
 - **Emulator-on-Mac + video stream:** the only path to true "inside the app", but it abandons the
@@ -374,7 +377,8 @@ item.** → **S5-14**.
   whole chain is fake/unit-tested. **Highest-value next step before relying on Feature 1.**
 - **S5-00 hot-reload latency number** — still uncaptured (`scripts/adb-connect.sh run <host>`).
 - **S5-13** custom boot-helper app (only if the off-the-shelf arming proves unreliable on ColorOS).
-- **S5-14 / S5-15 / S5-16** — the §10 enhancements above.
+- **S5-16** — base + task concurrent runs (the §10.2 enhancement; parked — needs 2 checkouts + 2
+  devices/appIds).
 - Broader project items (Sprint 4 hardening, LaunchAgent install, Shorebird, CI/CD) live in
   [`agent_mac.md`](agent_mac.md), [`app_progress.md`](app_progress.md) and
   [`NEXT_PHASE_IDEAS.md`](NEXT_PHASE_IDEAS.md).

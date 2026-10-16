@@ -77,8 +77,9 @@ class AppRouter extends RootStackRouter {
           guards: [PairingGuard(_ref)],
         ),
         AutoRoute(
+          // taskId/projectId are passed in-memory (task run vs base run), so no path params.
           page: RunRoute.page,
-          path: '/tasks/:taskId/run',
+          path: '/run',
           guards: [PairingGuard(_ref)],
         ),
         AutoRoute(
