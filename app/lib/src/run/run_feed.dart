@@ -1,5 +1,5 @@
 /// How a run-session log line should be rendered.
-enum RunLineKind { log, lifecycle, reload, error, success }
+enum RunLineKind { log, lifecycle, reload, error, success, console }
 
 /// One rendered line in the run log, derived from a daemon run event (S5-05).
 class RunLine {
@@ -84,6 +84,20 @@ RunLine? mapRunEvent(int seq, String type, dynamic payload) {
       return RunLine(seq: seq, kind: RunLineKind.lifecycle, text: 'Stopped');
     case 'run.error':
       return RunLine(seq: seq, kind: RunLineKind.error, text: p['reason']?.toString() ?? 'run failed');
+    case 'run.console': {
+      // Structured debug-console entry from the Dart VM Service (S5-14): Logging records + Flutter
+      // errors, with a level tag. Errors render as errors; everything else as a console line.
+      final source = p['source']?.toString();
+      final level = p['level']?.toString();
+      final body = p['text']?.toString() ?? '';
+      final prefix = (level != null && level.isNotEmpty) ? '$level  ' : '';
+      final isError = source == 'error' || level == 'SEVERE';
+      return RunLine(
+        seq: seq,
+        kind: isError ? RunLineKind.error : RunLineKind.console,
+        text: '$prefix$body',
+      );
+    }
     default:
       // run.created, run.debugPort carry no user-facing line.
       return null;

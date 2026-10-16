@@ -36,6 +36,15 @@ void main() {
       expect(mapRunEvent(9, 'run.created', {}), isNull);
       expect(mapRunEvent(10, 'run.debugPort', {'wsUri': 'ws://x'}), isNull);
     });
+
+    test('run.console: a log is a console line with a level tag; an error is an error line', () {
+      final log = mapRunEvent(11, 'run.console', {'source': 'log', 'level': 'INFO', 'text': 'hi'})!;
+      expect(log.kind, RunLineKind.console);
+      expect(log.text, 'INFO  hi');
+      final err = mapRunEvent(12, 'run.console', {'source': 'error', 'level': 'SEVERE', 'text': 'overflow'})!;
+      expect(err.kind, RunLineKind.error);
+      expect(err.text, contains('overflow'));
+    });
   });
 
   group('runStatusFromEvent', () {

@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-16 — **S5-12 (daemon) manual write endpoint** — `POST /tasks/:id/file` (path-safe `writeFileSafe`, contained to the project; only when the task's branch is checked out; triggers hot reload if a run is live on that branch); typecheck clean, **256 tests**. Earlier (2026-10-15): daemon side of Feature 1 complete (S5-01…07). See `app_progress.md` for the app editor + run screen. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-16 — **S5-14 (daemon) debug console** — a Node Dart-VM-Service client (`vmService.ts`) connects to the app's `wsUri`, subscribes to Logging + Flutter.Error, and RunService emits `run.console` events; typecheck clean, **266 tests**. Earlier today: S5-12 manual write endpoint (256 tests). Earlier (2026-10-15): daemon side of Feature 1 complete (S5-01…07). See `app_progress.md` for the app side. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -85,6 +85,27 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-16 — S5-14 (daemon) debug console via the Dart VM Service — dev side
+`flutter run --machine` forwards app stdout (→`run.log`); the VM Service adds what a real debug
+console shows and stdout doesn't: `dart:developer.log` records (levels + logger names) and
+structured Flutter errors. The daemon is Node, so we speak the VM Service JSON-RPC directly over a
+WebSocket (no Dart `vm_service` pkg). Branch `claude/live-run`.
+- **`src/run/vmService.ts`:** `parseVmEvent` (pure) decodes `Logging` records (level→FINE/INFO/
+  WARNING/SEVERE, logger name, appended error), `Extension`→`Flutter.Error` (description), and
+  `WriteEvent` (base64). `createVmServiceClient({url,onEntry,factory?})` — on open sends
+  `streamListen` for **Logging + Extension** (deliberately NOT Stdout/Stderr, to avoid duplicating
+  `app.log`), parses `streamNotify` events → `ConsoleEntry{source,level,text}`; injectable
+  `VmSocket` so it's testable; real factory uses Node's global `WebSocket`.
+- **RunService:** new `connectVmService` dep (default = real client). On a `debugPort` event with a
+  `wsUri`, connect and persist each entry as **`run.console`**; close the client on run exit /
+  dispose (one per run, replaced if debugPort fires again). The `wsUri` is the host-forwarded VM
+  URI flutter sets up over adb, so it's reachable from the Mac.
+- **Tested:** typecheck clean, **266 tests** (+10): `vmService.test.ts` (parser: Logging/error/
+  Flutter.Error/WriteEvent/ignored; client: subscribes on open, surfaces entries, ignores
+  responses/garbage, close) + RunService (connects on debugPort, persists run.console, closes on
+  exit; skips when no ws URI). Global WebSocket typed via `@types/node` undici-types.
+- **Not exercised:** a real VM Service connection (needs a live `flutter run` on a device).
 
 ### 2026-10-16 — S5-12 (daemon) manual file write endpoint — dev side
 Backs the app's manual code editor (Phase 2). Branch `claude/live-run`.

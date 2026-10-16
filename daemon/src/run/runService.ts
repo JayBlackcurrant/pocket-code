@@ -15,6 +15,7 @@ import {
   type RunSessionHandle,
   type SpawnRunSession,
 } from './runSession.js';
+import { createVmServiceClient, type ConsoleEntry, type VmServiceClient } from './vmService.js';
 
 /** Minimal structured logger; fastify's `app.log` satisfies it. */
 export interface RunLogger {
@@ -60,6 +61,9 @@ export interface RunServiceDeps {
   taskEvents?: { onEvent(listener: (e: StoredEvent) => void): () => void };
   /** Debounce for auto-reload, coalescing a burst of task completions. Default 400ms. */
   autoReloadDebounceMs?: number;
+  /** Connect the Dart VM Service for the debug console (S5-14). Defaults to a real WebSocket
+   *  client; tests pass a fake. Returns a handle to close when the run ends. */
+  connectVmService?: (url: string, onEntry: (e: ConsoleEntry) => void) => VmServiceClient;
 }
 
 export interface StartRunInput {
@@ -106,6 +110,8 @@ export class RunService {
   private readonly autoReloadDebounceMs: number;
   private readonly autoReloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private taskEventsUnsub: (() => void) | null = null;
+  private readonly connectVmService: (url: string, onEntry: (e: ConsoleEntry) => void) => VmServiceClient;
+  private readonly vmClients = new Map<string, VmServiceClient>();
 
   constructor(deps: RunServiceDeps) {
     this.registry = deps.registry;
@@ -117,6 +123,8 @@ export class RunService {
     this.guard = deps.checkoutGuard ?? new CheckoutGuard();
     this.log = deps.logger ?? noopLogger;
     this.autoReloadDebounceMs = deps.autoReloadDebounceMs ?? 400;
+    this.connectVmService =
+      deps.connectVmService ?? ((url, onEntry) => createVmServiceClient({ url, onEntry }));
     if (deps.taskEvents) {
       this.taskEventsUnsub = deps.taskEvents.onEvent((e) => this.onTaskEvent(e));
     }
@@ -281,6 +289,18 @@ export class RunService {
       case 'debugPort': {
         const uri = e.wsUri ?? e.baseUri;
         if (uri) this.runs.setDebugPort(runId, uri);
+        // Connect the VM Service for a structured debug console (S5-14). Needs the ws URI.
+        if (e.wsUri) {
+          this.vmClients.get(runId)?.close();
+          try {
+            this.vmClients.set(
+              runId,
+              this.connectVmService(e.wsUri, (entry) => this.persist(runId, 'run.console', entry)),
+            );
+          } catch {
+            /* the console is best-effort; a failed connect never breaks the run */
+          }
+        }
         this.persist(runId, 'run.debugPort', { wsUri: e.wsUri, baseUri: e.baseUri });
         return;
       }
@@ -330,6 +350,8 @@ export class RunService {
       clearTimeout(timer);
       this.autoReloadTimers.delete(runId);
     }
+    this.vmClients.get(runId)?.close();
+    this.vmClients.delete(runId);
     if (session) this.guard.releaseRun(session.projectId);
     if (row && row.status !== 'stopped' && row.status !== 'failed') {
       if (code === 0 || code === null) {
@@ -416,5 +438,7 @@ export class RunService {
     }
     for (const t of this.autoReloadTimers.values()) clearTimeout(t);
     this.autoReloadTimers.clear();
+    for (const c of this.vmClients.values()) c.close();
+    this.vmClients.clear();
   }
 }

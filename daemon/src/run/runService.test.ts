@@ -283,6 +283,59 @@ describe('RunService auto-reload after a Claude edit (S5-07)', () => {
   });
 });
 
+describe('RunService debug console (S5-14)', () => {
+  it('connects the VM service on debugPort and persists console entries, closing on exit', async () => {
+    let capturedUrl = '';
+    let onEntry: ((e: { source: string; level: string | null; text: string }) => void) | null = null;
+    let closed = false;
+    const svc2 = new RunService({
+      registry: fakeRegistry(),
+      runs,
+      runLog,
+      tasks,
+      git: fakeGit,
+      spawnRunSession: fake.spawn,
+      connectVmService: (url, cb) => {
+        capturedUrl = url;
+        onEntry = cb;
+        return { close: () => (closed = true) };
+      },
+    });
+    const row = await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    fake.emit({ kind: 'started', appId: 'a1' });
+    fake.emit({ kind: 'debugPort', wsUri: 'ws://127.0.0.1:1/abc=/ws', baseUri: 'http://127.0.0.1:1' });
+    expect(capturedUrl).toBe('ws://127.0.0.1:1/abc=/ws');
+
+    onEntry!({ source: 'log', level: 'INFO', text: 'hello from the app' });
+    const consoleEvents = svc2.logsSince(row.id, 0).filter((e) => e.type === 'run.console');
+    expect(consoleEvents).toHaveLength(1);
+    expect((consoleEvents[0]!.payload as { text: string }).text).toBe('hello from the app');
+
+    fake.exit(0);
+    await svc2.whenSettled(row.id);
+    expect(closed).toBe(true);
+  });
+
+  it('does not connect when debugPort has no ws URI', async () => {
+    let connected = false;
+    const svc2 = new RunService({
+      registry: fakeRegistry(),
+      runs,
+      runLog,
+      tasks,
+      git: fakeGit,
+      spawnRunSession: fake.spawn,
+      connectVmService: () => {
+        connected = true;
+        return { close: () => {} };
+      },
+    });
+    await svc2.start({ projectId: 'hedged', deviceSerial: 'x:5555', taskId: 't1' });
+    fake.emit({ kind: 'debugPort', wsUri: null, baseUri: 'http://127.0.0.1:1' });
+    expect(connected).toBe(false);
+  });
+});
+
 describe('RunService exit + recovery', () => {
   it('a non-zero exit marks the run failed', async () => {
     const row = await start();

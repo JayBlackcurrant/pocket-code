@@ -309,7 +309,8 @@ armed phone (no real `adb`/`flutter run` exercised yet — everything is fake/un
       _(Daemon `writeFileSafe` + endpoint, 256 tests; app `CodeEditorPage` from the run Code tab.)_
 - [ ] **S5-13** Custom boot-helper app (NSD port report, realme autostart) if off-the-shelf falls
       short.
-- [ ] **S5-14** **Debug console** via the Dart VM Service (see §10.3). Recommended first Phase-2 item.
+- [x] **S5-14** **Debug console** via the Dart VM Service (see §10.3). _(Daemon `vmService.ts` →
+      `run.console` events, 266 tests; app renders them in the Logs tab.)_
 - [ ] **S5-15** **Run the base branch** without a task (project-level Run entry) + make "switch to
       app" open Android **split-screen** (see §10.1/§10.2).
 - [ ] **S5-16** **Base + task concurrent runs** — needs two working trees + two devices/appIds; large,

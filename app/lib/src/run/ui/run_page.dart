@@ -486,6 +486,13 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
       case RunLineKind.lifecycle:
         return _note(
             context, line.text, context.colors.muted, Icons.info_outline);
+      case RunLineKind.console:
+        // Structured VM-service console entry (dart:developer logs) — monospace, tinted.
+        return Text(
+          line.text,
+          style: context.text.regular12.copyWith(
+              fontFamily: 'monospace', color: context.colors.accent),
+        );
       case RunLineKind.log:
         return Text(
           line.text,

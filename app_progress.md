@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no device tokens or
 > pairing codes. The app stores its token in `flutter_secure_storage` only.
 
-**Last updated:** 2026-10-16 — **S5-12 manual code editor** (`CodeEditorPage`, route `/tasks/:taskId/edit`): edit a file from the run screen's Code tab → **Save** (`POST /tasks/:id/file`) → hot reload. `RunActions.writeFile` added. analyze clean, **54 tests**, build bundle OK. Earlier (2026-10-15): S5-10 swipeable Logs|Code tabs; S5-09 run screen; S5-08 data layer. ⚠️ Feature 1 still not run end-to-end on a real phone.
+**Last updated:** 2026-10-16 — **S5-14 debug console** rendering — `run.console` events (from the daemon's VM-Service client: `dart:developer` logs + Flutter errors, with level tags) render in the run log (new `RunLineKind.console`, errors as errors). analyze clean, **55 tests**, build bundle OK. Earlier today: S5-12 manual code editor. Earlier (2026-10-15): S5-10/09/08 run screen + data layer. ⚠️ Feature 1 still not run end-to-end on a real phone.
 
 ---
 
@@ -81,6 +81,18 @@
 ---
 
 ## Log
+
+### 2026-10-16 — S5-14 debug-console rendering (`run.console`)
+Shows the structured debug console the daemon now streams from the Dart VM Service (see
+`agent_mac.md`) — `dart:developer.log` records (with level tags) + Flutter errors, which raw stdout
+doesn't give. Branch `claude/live-run`.
+- `run_feed.dart`: new `RunLineKind.console`; `mapRunEvent` handles **`run.console`** — a log
+  becomes a console line with a `LEVEL  ` tag, an error (`source:error` or `SEVERE`) becomes an
+  error line.
+- `run_page.dart`: console lines render monospace + tinted (accent) in the Logs tab, interleaved
+  with the run log.
+- **Tested:** `flutter analyze` clean, `flutter test` **55/55** (+1 run.console mapping),
+  `flutter build bundle` OK.
 
 ### 2026-10-16 — S5-12 manual code editor (Phase 2)
 Edit code by hand from the phone (not just via Claude) and hot-reload it. Pairs with the daemon's
