@@ -73,6 +73,18 @@ class RunActions extends _$RunActions {
     await dio.post<dynamic>('/runs/$runId/stop').guard();
   }
 
+  /// Save an edited file to the task's checkout (POST /tasks/:id/file, S5-12). Path-safe on the
+  /// daemon; if a live run is on the task's branch it hot-reloads. Returns whether a reload fired.
+  Future<bool> writeFile(String taskId, String path, String content) async {
+    final dio = ref.read(apiProvider);
+    final res = await dio.post<dynamic>(
+      '/tasks/$taskId/file',
+      data: {'path': path, 'content': content},
+    ).guard();
+    final data = res.data as Map<String, dynamic>;
+    return (data['reloadTriggered'] ?? false) as bool;
+  }
+
   /// The most recent still-active run for a task, if any (GET /projects/:id/runs, newest first).
   Future<RunRow?> activeForTask(String projectId, String taskId) async {
     final dio = ref.read(apiProvider);

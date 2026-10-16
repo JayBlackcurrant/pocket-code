@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { safeResolveWithin } from './pathSafety.js';
 
 /** Directories/files never shown in the project browser (heavy or noise). */
@@ -122,6 +122,43 @@ export class NotADirectoryError extends Error {
     super(`not a directory: "${path}"`);
     this.name = 'NotADirectoryError';
   }
+}
+
+export class FileTooLargeError extends Error {
+  constructor(path: string, maxBytes: number) {
+    super(`file too large: "${path}" exceeds ${maxBytes} bytes`);
+    this.name = 'FileTooLargeError';
+  }
+}
+
+/** Cap on a single manual write (S5-12). Generous for source files, bounded for safety. */
+export const FILE_WRITE_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Write a text file inside `root` (S5-12 manual editor), path-safe: the path must resolve within
+ * the project — `..` traversal and symlink escapes are rejected (PathNotAllowedError) before any
+ * write. Creates missing parent directories inside the project, refuses to overwrite a directory,
+ * and rejects content over `maxBytes`. Returns the written relative path + byte count.
+ */
+export function writeFileSafe(
+  root: string,
+  relPath: string,
+  content: string,
+  maxBytes = FILE_WRITE_MAX_BYTES,
+): { path: string; bytes: number } {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes > maxBytes) throw new FileTooLargeError(relPath, maxBytes);
+  const abs = safeResolveWithin(root, relPath); // throws PathNotAllowedError on escape
+  const rel = relative(root, abs);
+  try {
+    if (statSync(abs).isDirectory()) throw new NotAFileError(rel);
+  } catch (e) {
+    if (e instanceof NotAFileError) throw e;
+    // ENOENT: the file does not exist yet — creating it is allowed.
+  }
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, content, 'utf8');
+  return { path: rel, bytes };
 }
 
 export interface FileContent {

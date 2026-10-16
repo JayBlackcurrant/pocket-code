@@ -219,7 +219,7 @@ export class GitService {
   }
 
   /** Short name of the currently checked-out branch (or '' if detached). */
-  private async currentBranch(repoPath: string): Promise<string> {
+  async currentBranch(repoPath: string): Promise<string> {
     try {
       return (await this.git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     } catch {

@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no bearer/pairing
 > codes, API keys, or tailnet/MagicDNS names (those live only in `daemon/env.sh`, git-ignored).
 
-**Last updated:** 2026-10-15 — **S5-07 auto-reload after a Claude edit** landed (RunService subscribes to AgentRunner's event stream; a `task.completed` on a live run's branch → debounced hot reload; typecheck clean, **247 tests**). **Daemon side of Feature 1 (live run) is COMPLETE (S5-01…07).** Next: the Flutter app (`app_progress.md`). Earlier today: S5-06 device discovery; S5-05 routes+WS; S5-04 `CheckoutGuard`; S5-03 `RunService`; S5-02 spawn; S5-01 data layer. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
+**Last updated:** 2026-10-16 — **S5-12 (daemon) manual write endpoint** — `POST /tasks/:id/file` (path-safe `writeFileSafe`, contained to the project; only when the task's branch is checked out; triggers hot reload if a run is live on that branch); typecheck clean, **256 tests**. Earlier (2026-10-15): daemon side of Feature 1 complete (S5-01…07). See `app_progress.md` for the app editor + run screen. Earlier today: **S5-00 connectivity spike** — cellular adb proven via fixed-port `adb tcpip 5555` over the tailnet (same command on Wi-Fi/cellular/both, reconnect via saved pairing); hands-off **reboot re-arm blocked on ColorOS 15** (root or manual); `scripts/adb-connect.sh` now tries `:5555` first + parallel scan. Earlier (2026-10-11): tasks run in the project checkout on a `claude/<slug>` branch (no worktrees), one at a time per project, with edit-path containment; keyless Tailscale-served APK link; Sprint 3 daemon complete; SDK 0.1.77→0.3.296
 
 ---
 
@@ -85,6 +85,22 @@ tailscale serve status
 ---
 
 ## Log
+
+### 2026-10-16 — S5-12 (daemon) manual file write endpoint — dev side
+Backs the app's manual code editor (Phase 2). Branch `claude/live-run`.
+- **`writeFileSafe`** (`src/fs/fileReader.ts`): path-safe write via `safeResolveWithin` (rejects
+  `..`/symlink escapes → `PathNotAllowedError`), creates missing parent dirs inside the project,
+  refuses to overwrite a directory (`NotAFileError`), caps content at 1 MiB (`FileTooLargeError`).
+- **`GitService.currentBranch`** made public (was private) for the branch guard.
+- **`POST /tasks/:id/file`** `{path, content}` (`server.ts`): writes to the task's project checkout
+  **only when the task's branch is the one checked out** (409 otherwise — never edit the wrong
+  branch); 403 on path escape, 400 on a directory/invalid body, 413 too large. On success, if a run
+  is live + running on that branch it fires a hot reload (`flutter run` doesn't auto-watch files) and
+  returns `{ok, path, bytes, reloadTriggered}`.
+- **Tested:** typecheck clean, **256 tests** (+9): `fileWriter.test.ts` (create/overwrite/escape/
+  dir/too-large) + `fileWrite.test.ts` integration against a real temp repo (write 200 + file on
+  disk, `..`→403, wrong-branch→409, auth/body). No biometric gate (not in CLAUDE.md's sensitive
+  list; low-friction edit loop).
 
 ### 2026-10-15 — S5-07 auto-reload after a Claude edit — dev side
 The daily-loop payoff: edit via Claude → the live run hot-reloads on its own. Completes the daemon

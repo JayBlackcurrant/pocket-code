@@ -16,11 +16,13 @@ import {
 import { PathNotAllowedError } from './fs/pathSafety.js';
 import {
   readFileSafe,
+  writeFileSafe,
   listDir,
   searchFiles,
   FileNotFoundError,
   NotAFileError,
   NotADirectoryError,
+  FileTooLargeError,
 } from './fs/fileReader.js';
 import type { ProjectRegistry, RegisteredProject } from './registry/projectRegistry.js';
 import { type AgentRunner, ProjectBusyError } from './agent/agentRunner.js';
@@ -113,6 +115,10 @@ const DecisionBody = z.object({
 const DiffQuery = z.object({ path: z.string().min(1) });
 const CommitBody = z.object({ message: z.string().min(1).max(2000).optional() });
 const RevertBody = z.object({ path: z.string().min(1) });
+const WriteFileBody = z.object({
+  path: z.string().min(1).max(1024),
+  content: z.string().max(1_048_576),
+});
 
 const CreateBuildBody = z.object({
   flavor: z.string().min(1).max(100).optional(),
@@ -461,6 +467,44 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       }
     },
   );
+
+  // Manual file write (S5-12): save an edited file to the task's checkout, path-safe and contained
+  // to the project dir. Only when the task's branch is the one checked out (so we never edit the
+  // wrong branch). If a live run is on that branch, hot-reload so the edit takes effect.
+  app.post<{ Params: { id: string } }>('/tasks/:id/file', auth, async (req, reply) => {
+    const task = deps.tasks.get(req.params.id);
+    if (!task) return reply.code(404).send({ error: 'unknown task' });
+    const parsed = WriteFileBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+    }
+    const project = deps.registry.getActive(task.projectId);
+    if (!project?.resolvedPath) return reply.code(409).send({ error: 'project not active' });
+    if (task.branch) {
+      const current = await deps.git.currentBranch(project.resolvedPath);
+      if (current !== task.branch) {
+        return reply.code(409).send({
+          error: `task branch "${task.branch}" is not checked out (on "${current}"); start a run or continue the task first`,
+        });
+      }
+    }
+    try {
+      const res = writeFileSafe(project.resolvedPath, parsed.data.path, parsed.data.content);
+      // Pick up the edit in a live run on this branch (flutter run doesn't auto-watch files).
+      const run = deps.runService.activeForProject(task.projectId);
+      let reloadTriggered = false;
+      if (run && run.branch === task.branch && run.status === 'running') {
+        void deps.runService.reload(run.id).catch(() => {});
+        reloadTriggered = true;
+      }
+      return { ok: true, path: res.path, bytes: res.bytes, reloadTriggered };
+    } catch (err) {
+      if (err instanceof PathNotAllowedError) return reply.code(403).send({ error: err.message });
+      if (err instanceof NotAFileError) return reply.code(400).send({ error: err.message });
+      if (err instanceof FileTooLargeError) return reply.code(413).send({ error: err.message });
+      throw err;
+    }
+  });
 
   // Pending tool-permission requests for a task (S2-01) — e.g. after reconnect.
   app.get<{ Params: { id: string } }>('/tasks/:id/permissions', auth, async (req, reply) => {

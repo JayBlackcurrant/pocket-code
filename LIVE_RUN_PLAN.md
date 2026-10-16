@@ -305,7 +305,8 @@ occasional re-arm is a 5-second annoyance, never a hang.
 armed phone (no real `adb`/`flutter run` exercised yet — everything is fake/unit-tested).**
 
 **Phase 2 (later):**
-- [ ] **S5-12** In-app manual code editor + path-safe `POST /tasks/:id/file` write → triggers reload.
+- [x] **S5-12** In-app manual code editor + path-safe `POST /tasks/:id/file` write → triggers reload.
+      _(Daemon `writeFileSafe` + endpoint, 256 tests; app `CodeEditorPage` from the run Code tab.)_
 - [ ] **S5-13** Custom boot-helper app (NSD port report, realme autostart) if off-the-shelf falls
       short.
 - [ ] **S5-14** **Debug console** via the Dart VM Service (see §10.3). Recommended first Phase-2 item.
@@ -371,7 +372,6 @@ item.** → **S5-14**.
 - **Real end-to-end on the armed phone** — nothing has driven real `adb`/`flutter run` yet; the
   whole chain is fake/unit-tested. **Highest-value next step before relying on Feature 1.**
 - **S5-00 hot-reload latency number** — still uncaptured (`scripts/adb-connect.sh run <host>`).
-- **S5-12** manual in-app code editor (Phase 2).
 - **S5-13** custom boot-helper app (only if the off-the-shelf arming proves unreliable on ColorOS).
 - **S5-14 / S5-15 / S5-16** — the §10 enhancements above.
 - Broader project items (Sprint 4 hardening, LaunchAgent install, Shorebird, CI/CD) live in

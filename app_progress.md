@@ -8,7 +8,7 @@
 > **Conventions:** newest entry on top of the Log. Keep secrets OUT — no device tokens or
 > pairing codes. The app stores its token in `flutter_secure_storage` only.
 
-**Last updated:** 2026-10-15 — **S5-10 swipeable Logs | Code tabs** in `RunPage` (Code lists the task's changed files → diff/code viewer; control bar stays persistent). **Feature 1 (live run) is code-complete** (daemon S5-01…07 + app S5-08…11). analyze clean, **54 tests**, build bundle OK. ⚠️ not yet run end-to-end on a real phone. Earlier today: S5-09 run screen; S5-08 data layer.
+**Last updated:** 2026-10-16 — **S5-12 manual code editor** (`CodeEditorPage`, route `/tasks/:taskId/edit`): edit a file from the run screen's Code tab → **Save** (`POST /tasks/:id/file`) → hot reload. `RunActions.writeFile` added. analyze clean, **54 tests**, build bundle OK. Earlier (2026-10-15): S5-10 swipeable Logs|Code tabs; S5-09 run screen; S5-08 data layer. ⚠️ Feature 1 still not run end-to-end on a real phone.
 
 ---
 
@@ -81,6 +81,22 @@
 ---
 
 ## Log
+
+### 2026-10-16 — S5-12 manual code editor (Phase 2)
+Edit code by hand from the phone (not just via Claude) and hot-reload it. Pairs with the daemon's
+`POST /tasks/:id/file` (see `agent_mac.md`). Branch `claude/live-run`.
+- **`CodeEditorPage`** (route `/tasks/:taskId/edit`): loads the file via `fileContentProvider`, shows
+  an expanding monospace `TextField`, **Save** (enabled when dirty) → `RunActions.writeFile` →
+  invalidates `fileContent` + `diffSummary` and snackbars "Saved — hot reloading…" when a run picks
+  it up. Refuses binary + truncated files (edit those via Claude).
+- **`RunActions.writeFile(taskId, path, content)`** → `POST /tasks/:id/file`, returns whether a
+  reload fired.
+- Run screen **Code tab** now opens the editor on tap (during a run the branch is checked out, so
+  edits save + reload); the review screen keeps its read-only diff view.
+- **Tested:** `flutter analyze` clean, `flutter test` **54/54**, `flutter build bundle` OK, routes
+  regenerated. (Editor is UI; the security-critical write logic is daemon-side + tested there.)
+- Editing only works while the task's branch is checked out (daemon enforces 409 otherwise) — i.e.
+  during a live run, which is the intended loop.
 
 ### 2026-10-15 — S5-10 swipeable Logs | Code tabs in the run screen
 Finishes the app side of Feature 1. The live view's main area is now a `TabBar`/`TabBarView`

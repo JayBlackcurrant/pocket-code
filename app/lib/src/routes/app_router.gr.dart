@@ -55,6 +55,64 @@ class BuildsRouteArgs {
 }
 
 /// generated route for
+/// [CodeEditorPage]
+class CodeEditorRoute extends PageRouteInfo<CodeEditorRouteArgs> {
+  CodeEditorRoute({
+    required String taskId,
+    required String path,
+    Key? key,
+    List<PageRouteInfo>? children,
+  }) : super(
+          CodeEditorRoute.name,
+          args: CodeEditorRouteArgs(taskId: taskId, path: path, key: key),
+          initialChildren: children,
+        );
+
+  static const String name = 'CodeEditorRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      final args = data.argsAs<CodeEditorRouteArgs>();
+      return CodeEditorPage(
+        taskId: args.taskId,
+        path: args.path,
+        key: args.key,
+      );
+    },
+  );
+}
+
+class CodeEditorRouteArgs {
+  const CodeEditorRouteArgs({
+    required this.taskId,
+    required this.path,
+    this.key,
+  });
+
+  final String taskId;
+
+  final String path;
+
+  final Key? key;
+
+  @override
+  String toString() {
+    return 'CodeEditorRouteArgs{taskId: $taskId, path: $path, key: $key}';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! CodeEditorRouteArgs) return false;
+    return taskId == other.taskId && path == other.path && key == other.key;
+  }
+
+  @override
+  int get hashCode => taskId.hashCode ^ path.hashCode ^ key.hashCode;
+}
+
+/// generated route for
 /// [CodeViewerPage]
 class CodeViewerRoute extends PageRouteInfo<CodeViewerRouteArgs> {
   CodeViewerRoute({

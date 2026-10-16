@@ -247,8 +247,9 @@ class _RunPageState extends ConsumerState<RunPage> with SingleTickerProviderStat
                         context.text.regular12.copyWith(color: context.colors.red)),
               ],
             ),
+      // Tap to edit (S5-12): during a run the branch is checked out, so edits save + hot-reload.
       onTap: () =>
-          context.router.push(DiffFileRoute(taskId: widget.taskId, path: file.path)),
+          context.router.push(CodeEditorRoute(taskId: widget.taskId, path: file.path)),
     );
   }
 
